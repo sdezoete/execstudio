@@ -1,0 +1,73 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Studio server (HTTP, development)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/server.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": {
+        "PYTHONUTF8": "1",
+        "STUDIO_TLS_ENABLED": "0",
+        "STUDIO_PORT": "8080"
+      },
+      "justMyCode": true
+    },
+    {
+      "name": "Studio + mock AI (HTTP, no DeepSeek needed)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/server.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "preLaunchTask": "Mock AI server",
+      "env": {
+        "PYTHONUTF8": "1",
+        "STUDIO_LLM_BASE_URL": "http://127.0.0.1:8001/v1",
+        "STUDIO_HOST": "127.0.0.1",
+        "STUDIO_TLS_ENABLED": "0",
+        "STUDIO_PORT": "8080"
+      },
+      "justMyCode": true
+    },
+    {
+      "name": "Studio over HTTPS (self-signed TEST certificate)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/server.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "preLaunchTask": "Make test certificate",
+      "env": {
+        "PYTHONUTF8": "1",
+        "STUDIO_TLS_ENABLED": "1",
+        "STUDIO_TLS_PFX_FILE": "",
+        "STUDIO_TLS_CERT_FILE": "certs/test-cert.pem",
+        "STUDIO_TLS_KEY_FILE": "certs/test-key.pem",
+        "STUDIO_TLS_ALLOW_SELF_SIGNED": "1",
+        "STUDIO_HOST": "127.0.0.1",
+        "STUDIO_PORT": "8443"
+      },
+      "justMyCode": true
+    },
+    {
+      "name": "Tests",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "unittest",
+      "args": [
+        "discover",
+        "-s",
+        "tests",
+        "-v"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": {
+        "PYTHONUTF8": "1"
+      }
+    }
+  ]
+}

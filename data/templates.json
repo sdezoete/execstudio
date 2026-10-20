@@ -1,0 +1,26 @@
+{
+  "default": "corporate",
+  "templates": [
+    {
+      "id": "corporate", "name": "Corporate Master v4",
+      "file": "corporate.potx",
+      "layouts": {"title": "Title Slide", "content": "Title Only"},
+      "title_size": 28,
+      "accent": "1F47C9", "ink": "1A2421", "muted": "5A6763", "tile": "EDF1EF", "warn": "D9822B", "font": "Calibri"
+    },
+    {
+      "id": "board", "name": "Board Pack 2026",
+      "file": "board.potx",
+      "layouts": {"title": "Title Slide", "content": "Title Only"},
+      "title_size": 28,
+      "accent": "0E5E4E", "ink": "16201C", "muted": "56635E", "tile": "E8EFEC", "warn": "B8641C", "font": "Calibri"
+    },
+    {
+      "id": "ir", "name": "Investor Relations",
+      "file": "investor-relations.potx",
+      "layouts": {"title": "Title Slide", "content": "Title Only"},
+      "title_size": 28,
+      "accent": "6B2A8C", "ink": "1C1A22", "muted": "5E5A66", "tile": "EFEBF2", "warn": "C46A1B", "font": "Calibri"
+    }
+  ]
+}

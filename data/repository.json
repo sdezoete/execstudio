@@ -1,0 +1,31 @@
+{
+  "items": [
+    {"id": "margin-bridge", "kind": "driver", "category": "Performance", "title": "Margin bridge by driver", "question": "Why did our margin change?", "uses": 41,
+     "headline": "Margin fell [x] pts, driven mainly by [driver 1] and [driver 2]",
+     "structure": ["Starting margin and ending margin", "One step per driver, sized in points", "Highlight the driver you will act on", "Source and period in the footer"]},
+    {"id": "kpi-scorecard", "kind": "kpi", "category": "Performance", "title": "Quarterly KPI scorecard", "question": "Are we on track against plan?", "uses": 87,
+     "headline": "[n] of [m] KPIs are on track; [KPI] needs action",
+     "structure": ["4–6 KPIs with target and actual", "Status per KPI: on track, at risk, off track", "One line on each exception", "Owner for each off-track KPI"]},
+    {"id": "investment-brief", "kind": "decision", "category": "Decision", "title": "Investment decision brief", "question": "Should we fund this project?", "uses": 52,
+     "headline": "Approve [amount] for [project] to deliver [benefit] by [date]",
+     "structure": ["The ask in one sentence", "Investment, return and payback", "Main risk and mitigation", "Cost of waiting"]},
+    {"id": "options-2x2", "kind": "matrix", "category": "Strategy", "title": "Strategic options 2×2", "question": "Which option should we pursue?", "uses": 33,
+     "headline": "[Option] gives the best value for acceptable risk",
+     "structure": ["Two criteria leaders care about", "Each option placed on the grid", "Recommended option highlighted", "Why the others lose, in one line each"]},
+    {"id": "transformation-roadmap", "kind": "roadmap", "category": "Transformation", "title": "Three-wave transformation roadmap", "question": "How and when do we deliver?", "uses": 29,
+     "headline": "We reach [end state] by [date] in three waves",
+     "structure": ["Three phases on one timeline", "Milestones and owners per phase", "Decision gates marked", "Benefits unlocked per wave"]},
+    {"id": "risk-heatmap", "kind": "risk", "category": "Risk", "title": "Enterprise risk heat map", "question": "What could go wrong and who owns it?", "uses": 24,
+     "headline": "[Risk] is the only risk above tolerance; mitigation is in place",
+     "structure": ["Risks placed by likelihood and impact", "Top three with mitigation and owner", "Residual risk after mitigation", "What we need from leadership"]},
+    {"id": "business-case", "kind": "bars", "category": "Business case", "title": "Business case: cost vs benefit", "question": "Does the investment pay back?", "uses": 38,
+     "headline": "[Project] pays back in [n] years with [x]% IRR",
+     "structure": ["Costs and benefits by year", "Cumulative cash line with payback point", "Key assumptions", "Sensitivity on the biggest assumption"]},
+    {"id": "exec-summary", "kind": "summary", "category": "Strategy", "title": "Answer-first executive summary", "question": "What do leaders need to know?", "uses": 112,
+     "headline": "[The answer in one sentence, including the ask]",
+     "structure": ["The answer and the ask", "Three supporting messages", "One figure per message", "Next steps and owner"]},
+    {"id": "attrition-drivers", "kind": "driver", "category": "Performance", "title": "Employee turnover driver tree", "question": "Why did attrition rise?", "uses": 17,
+     "headline": "Turnover rose [x] pts, mainly from early-tenure exits in [function]",
+     "structure": ["Overall attrition change", "Split by tenure, function and reason", "Size each driver", "Action on the largest driver"]}
+  ]
+}

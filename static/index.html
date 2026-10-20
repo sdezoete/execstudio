@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Executive Presentation Studio</title>
+<link rel="icon" href="/static/img/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 14 14"><rect x="1" y="2" width="12" height="8" rx="1" class="bm-stroke"/><rect x="6" y="10" width="2" height="3" class="bm-fill"/></svg></span>
+    Executive Presentation Studio
+  </div>
+  <div class="gov" aria-label="Governance settings">
+    <label for="classif">Label <select id="classif"></select></label>
+    <label for="tmpl">Template <select id="tmpl"></select></label>
+    <span class="pill" id="modelPill" title="AI model status">Checking AI…</span>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="rail" aria-label="Main">
+    <button type="button" data-view="studio" aria-current="page"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="9" rx="1.5" class="ic"/><path d="M5 14h6" class="ic"/></svg>Presentation studio</button>
+    <button type="button" data-view="advisor"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5a4.5 4.5 0 0 0-2.5 8.2V12h5V9.7A4.5 4.5 0 0 0 8 1.5Z" class="ic"/><path d="M6 14.5h4" class="ic"/></svg>Slide advisor</button>
+    <button type="button" data-view="repo"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" class="ic"/><path d="m10.5 10.5 3.5 3.5" class="ic"/></svg>Slide repository</button>
+    <button type="button" data-view="toolkit"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1" class="ic"/><rect x="9" y="1.5" width="5.5" height="5.5" rx="1" class="ic"/><rect x="1.5" y="9" width="5.5" height="5.5" rx="1" class="ic"/><rect x="9" y="9" width="5.5" height="5.5" rx="1" class="ic"/></svg>Toolkit</button>
+    <div class="rail-foot" id="railFoot">Checking the AI service…</div>
+  </nav>
+
+  <main>
+    <!-- STUDIO -->
+    <section id="view-studio">
+      <div class="view-head">
+        <div>
+          <div class="eyebrow">Presentation studio</div>
+          <h1>What would you like to accomplish today?</h1>
+          <p>Describe the presentation and who it is for. The studio proposes a storyline, recommends layouts, checks quality and prepares you for questions.</p>
+        </div>
+        <button class="btn btn-ghost" type="button" id="newDeck">Start a new brief</button>
+      </div>
+      <div class="studio">
+        <form class="panel brief" id="briefForm" novalidate>
+          <div class="field">
+            <span class="lbl">Task</span>
+            <div class="tasks" role="radiogroup" aria-label="Task">
+              <label class="choice"><input type="radio" name="task" id="t-new" value="new" checked><span>Generate a new presentation<small>Storyline to editable slides</small></span></label>
+              <label class="choice"><input type="radio" name="task" id="t-improve" value="improve"><span>Improve an existing deck<small>Restructure and re-template</small></span></label>
+              <label class="choice"><input type="radio" name="task" id="t-single" value="single"><span>Create one executive slide<small>A single slide for one message</small></span></label>
+              <label class="choice"><input type="radio" name="task" id="t-find" value="find"><span>Find a template or visual<small>Search approved slides</small></span></label>
+            </div>
+          </div>
+          <div class="field">
+            <label class="lbl" for="topic">Presentation topic</label>
+            <input class="text" id="topic" placeholder="e.g. Q3 business performance review" required>
+          </div>
+          <div class="field">
+            <label class="lbl" for="decision">Decision you need from the audience</label>
+            <input class="text" id="decision" placeholder="e.g. Approve a 3% mid-market price increase from January">
+            <span class="hint">Executive decks work best when the ask is explicit.</span>
+          </div>
+          <div class="field">
+            <label class="lbl" for="notesIn">Key facts and context <span class="opt-tag">optional</span></label>
+            <textarea class="text" id="notesIn" rows="3" placeholder="Paste figures, findings or bullet points. The AI only uses numbers you provide."></textarea>
+          </div>
+          <div class="field">
+            <span class="lbl">Target audience</span>
+            <div class="seg" role="radiogroup" aria-label="Target audience" id="audSeg"></div>
+          </div>
+          <div class="field" id="lenField">
+            <span class="lbl">Deck length</span>
+            <div class="seg" role="radiogroup" aria-label="Deck length">
+              <label class="choice"><input type="radio" name="len" id="l-s" value="short"><span>1–3 slides</span></label>
+              <label class="choice"><input type="radio" name="len" id="l-m" value="mid" checked><span>5–10 slides</span></label>
+              <label class="choice"><input type="radio" name="len" id="l-l" value="long"><span>10–20 slides</span></label>
+            </div>
+          </div>
+          <div class="field">
+            <span class="lbl">Content source</span>
+            <div class="seg" role="radiogroup" aria-label="Content source">
+              <label class="choice"><input type="radio" name="src" id="s-scratch" value="scratch" checked><span>From scratch</span></label>
+              <label class="choice"><input type="radio" name="src" id="s-docs" value="docs"><span>Data &amp; documents</span></label>
+              <label class="choice"><input type="radio" name="src" id="s-deck" value="deck"><span>Existing deck</span></label>
+            </div>
+            <div class="drop" id="dropzone" hidden>
+              <label for="files" class="drop-lbl">Add files <small id="fileTypes">.pptx .docx .xlsx .csv .txt .md</small></label>
+              <input type="file" id="files" multiple accept=".pptx,.docx,.xlsx,.csv,.txt,.md">
+              <ul class="filelist" id="fileList"></ul>
+            </div>
+          </div>
+          <p class="form-error" id="briefError" role="alert" hidden></p>
+          <button class="btn btn-primary" type="submit" id="go">Design my presentation</button>
+        </form>
+
+        <div class="deck">
+          <section class="panel xform" id="xform" aria-labelledby="xformTitle" hidden>
+            <div class="xform-head">
+              <div class="deck-title">
+                <div class="eyebrow">Improve an existing deck</div>
+                <h2 id="xformTitle">Upload the deck you want to improve</h2>
+                <p class="note" id="xformNote">Add a .pptx under Content source. You can then rewrite selected slides in place, or move them onto the corporate template.</p>
+              </div>
+            </div>
+            <div id="xformBody" hidden>
+              <div class="xform-bar">
+                <span class="note" id="xformCount"></span>
+                <span class="row"><button type="button" class="icon-btn" id="selAll">Select all</button><button type="button" class="icon-btn" id="selNone">Clear</button></span>
+              </div>
+              <ol class="xslides" id="xslides"></ol>
+              <fieldset class="xopts">
+                <legend class="lbl">Changes to make</legend>
+                <label class="opt"><input type="checkbox" id="xa-head" checked><span><b>Rewrite headlines as action titles</b><span>Each title states the finding, in 15 words or fewer. Covers and agendas are left alone.</span></span></label>
+                <label class="opt"><input type="checkbox" id="xa-simp"><span><b>Simplify the main text</b><span>Up to five short points per slide. Every number and name is kept.</span></span></label>
+                <label class="opt"><input type="checkbox" id="xa-tpl"><span><b>Move onto the corporate template</b><span id="xaTplNote">Rebuilds the selected slides on the approved template. Charts, tables and pictures come across; SmartArt and grouped diagrams are listed for manual copying.</span></span></label>
+              </fieldset>
+              <div class="row xform-actions">
+                <button type="button" class="btn btn-primary" id="xformGo">Transform selected slides</button>
+                <span class="note" id="xformMode"></span>
+              </div>
+              <div id="xformReport"></div>
+            </div>
+          </section>
+          <div class="panel pipeline" id="pipeline" aria-label="Workflow progress"></div>
+          <div class="panel" id="deckPanel">
+            <div class="deck-head">
+              <div class="deck-title">
+                <div class="eyebrow" id="deckEyebrow">No storyline yet</div>
+                <h2 id="deckTitle">Your storyline will appear here</h2>
+                <div class="meta" id="deckMeta"></div>
+              </div>
+              <div class="versions">
+                <span class="eyebrow">Audience version</span>
+                <div class="seg" role="radiogroup" aria-label="Audience version">
+                  <label class="choice"><input type="radio" name="ver" id="v-full" value="full" checked><span>Full deck</span></label>
+                  <label class="choice"><input type="radio" name="ver" id="v-sum" value="summary"><span>Executive summary</span></label>
+                  <label class="choice"><input type="radio" name="ver" id="v-brief" value="brief"><span>Decision brief</span></label>
+                </div>
+              </div>
+            </div>
+            <div class="tabs" role="tablist" aria-label="Deck views">
+              <button type="button" role="tab" id="tab-story" aria-controls="panel-story" aria-selected="true" data-tab="story">Storyline</button>
+              <button type="button" role="tab" id="tab-qa" aria-controls="panel-qa" aria-selected="false" data-tab="qa">Quality check <span class="count" id="qaCount" hidden></span></button>
+              <button type="button" role="tab" id="tab-prep" aria-controls="panel-prep" aria-selected="false" data-tab="prep">Q&amp;A preparation</button>
+              <button type="button" role="tab" id="tab-export" aria-controls="panel-export" aria-selected="false" data-tab="export">Export</button>
+            </div>
+            <div class="tabpanel" id="panel-story" role="tabpanel" aria-labelledby="tab-story"></div>
+            <div class="tabpanel" id="panel-qa" role="tabpanel" aria-labelledby="tab-qa" hidden></div>
+            <div class="tabpanel" id="panel-prep" role="tabpanel" aria-labelledby="tab-prep" hidden></div>
+            <div class="tabpanel" id="panel-export" role="tabpanel" aria-labelledby="tab-export" hidden>
+              <div class="export">
+                <label class="opt"><input type="checkbox" id="x-pptx" checked disabled><span><b>Editable PowerPoint (.pptx)</b><span id="xTemplate">Built on the approved template.</span></span></label>
+                <label class="opt"><input type="checkbox" id="x-notes" checked><span><b>Speaker notes</b><span>Always in the PowerPoint notes pane. Tick to add them to the briefing pack too.</span></span></label>
+                <label class="opt"><input type="checkbox" id="x-brief" checked><span><b>One-page executive brief</b><span>A pre-read that states the context, the answer and the ask.</span></span></label>
+                <label class="opt"><input type="checkbox" id="x-qa"><span><b>Q&amp;A appendix</b><span>Anticipated questions with suggested answers.</span></span></label>
+                <div class="row"><button class="btn btn-primary" id="exportBtn" type="button">Export</button></div>
+                <p class="note" id="exportNote"></p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ADVISOR -->
+    <section id="view-advisor" hidden>
+      <div class="view-head">
+        <div>
+          <div class="eyebrow">Smart slide recommendation</div>
+          <h1>Tell us the message. We'll pick the slide.</h1>
+          <p>Write what the slide needs to communicate in plain words. The advisor recommends a layout, a visual and a headline structure.</p>
+        </div>
+      </div>
+      <div class="advisor">
+        <form class="panel ask" id="adviseForm">
+          <div class="field">
+            <label class="lbl" for="message">What do you need to show?</label>
+            <textarea class="text" id="message" rows="4">I need to show why employee turnover increased this year.</textarea>
+          </div>
+          <div class="examples" aria-label="Examples">
+            <button type="button">Compare three vendor options for the CRM replacement</button>
+            <button type="button">Ask the board to approve the new plant investment</button>
+            <button type="button">Show our 18-month transformation plan</button>
+            <button type="button">Summarise the top risks for the product launch</button>
+          </div>
+          <button class="btn btn-primary" type="submit" id="adviseBtn">Recommend a slide</button>
+        </form>
+        <div class="advice">
+          <div class="panel rec" id="rec"><p class="empty">Describe your message and select “Recommend a slide”.</p></div>
+          <div class="alts" id="alts"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- REPOSITORY -->
+    <section id="view-repo" hidden>
+      <div class="view-head">
+        <div>
+          <div class="eyebrow">Best-practice repository</div>
+          <h1>Approved slides you can reuse</h1>
+          <p>Search by business question or slide type. Every structure here passed executive review.</p>
+        </div>
+      </div>
+      <div class="searchbar"><input class="text" id="repoSearch" type="search" placeholder="Search, e.g. “why did costs rise” or “roadmap”" aria-label="Search approved slides"></div>
+      <div class="filters" id="repoFilters"></div>
+      <div class="grid" id="repoGrid"></div>
+    </section>
+
+    <!-- TOOLKIT -->
+    <section id="view-toolkit" hidden>
+      <div class="view-head">
+        <div>
+          <div class="eyebrow">Enterprise presentation toolkit</div>
+          <h1>Standards, guides and assets</h1>
+          <p>The reusable library behind every generated deck. Open an example to see a component applied.</p>
+        </div>
+      </div>
+      <div class="grid" id="toolGrid"></div>
+    </section>
+  </main>
+</div>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script src="/static/js/thumbs.js"></script>
+<script src="/static/js/api.js"></script>
+<script src="/static/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "items": [
+    {"name": "Executive slide catalog", "summary": "Strategy, performance, decision, risk, business case and transformation layouts.", "when": "When to use: you know the message but not the layout.", "example": "A margin bridge that walks from last quarter's margin to this quarter's, one bar per driver."},
+    {"name": "Storytelling playbook", "summary": "How to structure a narrative leaders follow: situation, complication, resolution, ask.", "when": "When to use: before you draft any slide.", "example": "Revenue beat plan (situation), but margin slipped (complication); a price change fixes it (resolution); approve it (ask)."},
+    {"name": "Visual library", "summary": "Approved charts, diagrams, icons, roadmaps, matrices and process flows.", "when": "When to use: you need a visual that matches the brand.", "example": "The three-wave roadmap with decision gates marked as diamonds."},
+    {"name": "Writing guide", "summary": "Action headlines, concise wording and recommendations that start with a verb.", "when": "When to use: tightening headlines and bullets.", "example": "Replace “Q3 revenue overview” with “Q3 revenue beat plan by 4% on enterprise growth”."},
+    {"name": "Data visualization guide", "summary": "Rules for choosing the right chart and presenting metrics honestly.", "when": "When to use: choosing between a bar, line, waterfall or table.", "example": "Use a waterfall to explain the change between two totals; never a pie with more than three parts."},
+    {"name": "Corporate standards", "summary": "Fonts, colours, master layouts, terminology and confidentiality labels.", "when": "When to use: checking a deck before it leaves your team.", "example": "Every slide footer carries the label chosen in the governance bar."},
+    {"name": "Example presentations", "summary": "Approved decks and single slides that passed executive review.", "when": "When to use: you want to see what good looks like.", "example": "The FY26 board pack: nine slides with a one-page pre-read."},
+    {"name": "Quality checklist", "summary": "Executive readiness, factual accuracy, consistency and design checks.", "when": "When to use: the final pass before sending.", "example": "Answer first, action titles, one message per slide, a source on every chart."}
+  ]
+}
