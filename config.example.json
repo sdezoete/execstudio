@@ -14,7 +14,7 @@
   "llm_base_url": "http://deepseek.internal:8000/v1",
   "llm_api_key": "",
   "llm_model": "deepseek-4.1-flash",
-  "llm_display_name": "DeepSeek 4.1 Flash",
+  "llm_display_name": "ARIF",
   "llm_timeout": 120,
   "llm_temperature": 0.3,
   "llm_max_tokens": 4096,

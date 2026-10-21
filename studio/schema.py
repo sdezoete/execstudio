@@ -1,5 +1,5 @@
 """Validation and normalisation of data coming from the browser or the LLM."""
-from .catalog import AUDIENCE_BY_ID, CLASSIFICATIONS, DEFAULT_CLASSIFICATION, KINDS, LENGTHS
+from .catalog import AUDIENCE_BY_ID, KINDS, LENGTHS
 
 TASKS = ("new", "improve", "single", "find")
 SOURCES = ("scratch", "docs", "deck")
@@ -29,7 +29,6 @@ def brief(raw):
         "audience": raw.get("audience") if raw.get("audience") in AUDIENCE_BY_ID else "board",
         "length": raw.get("length") if raw.get("length") in LENGTHS else "mid",
         "source": raw.get("source") if raw.get("source") in SOURCES else "scratch",
-        "classification": raw.get("classification") if raw.get("classification") in CLASSIFICATIONS else DEFAULT_CLASSIFICATION,
         "template": _s(raw.get("template"), 60),
     }
     return b

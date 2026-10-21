@@ -306,8 +306,7 @@ def content_area(prs, slide):
 
 def footer(prs, c, idx, total, meta, slide=None):
     sw, sh = inches(prs.slide_width), inches(prs.slide_height)
-    c.text(0.5, sh - 0.48, sw * 0.55, 0.35, meta["classification"].upper() + "  ·  " + meta["template_name"],
-           size=9, color=c.colors["muted"])
+    c.text(0.5, sh - 0.48, sw * 0.55, 0.35, meta["template_name"], size=9, color=c.colors["muted"])
     if idx:
         c.text(sw - 1.55, sh - 0.48, 1.05, 0.35, "%d / %d" % (idx, total), size=9, color=c.colors["muted"], align="r")
     if slide is None:
@@ -378,8 +377,6 @@ def build(title, slides, meta, tpl, template_path=None):
     cp = prs.core_properties
     cp.title = title[:250]
     cp.author = meta.get("author", "Executive Presentation Studio")
-    cp.keywords = meta["classification"]
-    cp.category = meta["classification"]
     cp.subject = meta.get("audience", "")
     cp.last_modified_by = "Executive Presentation Studio"
     buf = io.BytesIO()

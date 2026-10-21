@@ -67,9 +67,7 @@
       facts: $("#notesIn").value.trim(),
       audience: radio("aud"),
       length: radio("len"),
-      source: radio("src"),
-      classification: $("#classif").value,
-      template: $("#tmpl").value
+      source: radio("src")
     };
   }
   function briefKey(b) {
@@ -103,14 +101,11 @@
     if (b.audience) setRadio("aud", b.audience);
     if (b.length) setRadio("len", b.length);
     if (b.source) setRadio("src", b.source);
-    if (b.classification) $("#classif").value = b.classification;
-    if (b.template) $("#tmpl").value = b.template;
     state.files = d.files || [];
     state.versions = d.versions || {};
     state.version = d.version || "full";
     state.briefKey = d.briefKey || "";
     state.deck = d.deck || null;
-    setRadio("ver", state.version);
     if (current()) state.stages = ["done", "done", "done", "done", "todo", "todo"];
     return true;
   }
@@ -119,12 +114,6 @@
   async function loadMeta() {
     var m = await Api.get("/api/meta");
     state.meta = m;
-    $("#classif").innerHTML = m.classifications.map(function (c) {
-      return '<option' + (c === m.default_classification ? " selected" : "") + ">" + esc(c) + "</option>";
-    }).join("");
-    $("#tmpl").innerHTML = m.templates.map(function (t) {
-      return '<option value="' + esc(t.id) + '"' + (t.id === m.default_template ? " selected" : "") + ">" + esc(t.name) + "</option>";
-    }).join("");
     $("#audSeg").innerHTML = m.audiences.map(function (a, i) {
       return '<label class="choice"><input type="radio" name="aud" id="aud-' + i + '" value="' + esc(a.id) + '"' + (i === 0 ? " checked" : "") + '><span>' + esc(a.short) + "</span></label>";
     }).join("");
@@ -139,11 +128,9 @@
       if (h.pdf) { $("#files").setAttribute("accept", ".pptx,.docx,.xlsx,.pdf,.csv,.txt,.md"); $("#fileTypes").textContent = ".pptx .docx .xlsx .pdf .csv .txt .md"; }
       var eng = h.pptx || {};
       var engLine = "<br>PowerPoint: <b>" + esc(eng.engine || "?") + "</b>" + (eng.advanced ? "" : " (install python-pptx for templates and charts)");
-      pill.innerHTML = '<span class="led ' + (on ? "on" : "off") + '"></span>' + esc(on ? h.llm.model : "AI offline");
-      pill.title = on ? "Connected to " + h.llm.model : (h.llm.detail || "The AI service is not reachable");
-      foot.innerHTML = on
-        ? "AI: <b>" + esc(h.llm.model) + "</b><br>Connected. Content stays on this network." + engLine
-        : "AI: <b>unavailable</b><br>" + esc(h.llm.detail || "") + " The studio uses built-in rules until it reconnects." + engLine;
+      pill.innerHTML = '<span class="led ' + (on ? "on" : "off") + '"></span>Powered by ARIF';
+      pill.title = on ? "ARIF is connected" : (h.llm.detail || "ARIF is not reachable");
+      foot.innerHTML = '<span class="led ' + (on ? "on" : "off") + '"></span> Powered by ARIF' + engLine;
       renderXform();
     } catch (e) {
       pill.innerHTML = '<span class="led off"></span>Server unreachable';
@@ -151,10 +138,6 @@
     }
   }
 
-  function templateName(id) {
-    var t = state.meta && state.meta.templates.filter(function (x) { return x.id === id; })[0];
-    return t ? t.name : id;
-  }
   function audienceLabel(id) {
     var a = state.meta && state.meta.audiences.filter(function (x) { return x.id === id; })[0];
     return a ? a.label : id;
@@ -191,8 +174,6 @@
     $("#deckMeta").innerHTML = [
       '<span class="chip acc">' + esc(audienceLabel(b.audience)) + "</span>",
       '<span class="chip num">' + v.slides.length + " slide" + (v.slides.length === 1 ? "" : "s") + "</span>",
-      '<span class="chip">' + esc(templateName(b.template)) + "</span>",
-      '<span class="chip">' + esc(b.classification) + "</span>",
       srcChip
     ].join("");
 
@@ -222,7 +203,6 @@
       "</li>";
     }).join("") + "</ol>";
     $$(".headline").forEach(autosize);
-    $("#xTemplate").textContent = "Built on " + templateName(b.template) + ", labelled “" + b.classification + "”.";
     renderReview();
   }
 
@@ -338,7 +318,7 @@
     var d = state.deck; if (!d) return;
     $("#xformCount").textContent = d.selected.length + " of " + d.slides.length + " slides selected";
     var tpl = $("#xa-tpl").checked;
-    $("#xformMode").textContent = tpl ? "The new deck will contain only the selected slides, on " + templateName($("#tmpl").value) + "."
+    $("#xformMode").textContent = tpl ? "The new deck will contain only the selected slides, on the approved template."
       : "All slides are kept; only the selected ones change. Formatting is preserved.";
   }
   $("#xslides").addEventListener("change", function (e) {
@@ -526,7 +506,6 @@
   $("#briefForm").addEventListener("submit", function (e) {
     e.preventDefault();
     if (radio("task") === "find") { show("repo"); return; }
-    setRadio("ver", "full"); state.version = "full";
     generate("full");
   });
 
@@ -584,26 +563,12 @@
     renderFiles(); save();
   });
 
-  $$('input[name="ver"]').forEach(function (r) {
-    r.addEventListener("change", function () {
-      state.version = r.value;
-      state.review = null; state.qa = null; state.reviewStale = true;
-      if (current()) { renderDeck(); runReview(); save(); }
-      else if (brief().topic && state.briefKey) generate(r.value, { quiet: true });
-      else renderDeck();
-    });
-  });
-  ["#classif", "#tmpl"].forEach(function (id) {
-    $(id).addEventListener("change", function () { state.reviewStale = true; save(); renderDeck(); });
-  });
-
   $("#newDeck").addEventListener("click", function () {
     $("#briefForm").reset();
     $("#topic").value = ""; $("#decision").value = ""; $("#notesIn").value = "";
     state.files = []; state.versions = {}; state.briefKey = ""; state.review = null; state.qa = null; state.version = "full";
     state.deck = null; state.xformResult = null;
     state.stages = ["todo", "todo", "todo", "todo", "todo", "todo"];
-    setRadio("ver", "full");
     $("#dropzone").hidden = true; $("#lenField").hidden = false; $("#go").textContent = "Design my presentation";
     renderFiles(); renderPipeline(); renderDeck(); renderXform(); selectTab("story"); save();
     $("#topic").focus();
@@ -615,7 +580,6 @@
     $$(".rail button").forEach(function (b) { if (b.dataset.view === v) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current"); });
     try { localStorage.setItem("eps-view", v); } catch (e) { /* ignore */ }
     if (v === "repo" && !repoLoaded) loadRepo();
-    if (v === "toolkit" && !toolkitLoaded) loadToolkit();
     window.scrollTo(0, 0);
   }
   $$(".rail button").forEach(function (b) { b.addEventListener("click", function () { show(b.dataset.view); }); });
@@ -692,26 +656,6 @@
     var b = e.target.closest("[data-id]"); if (!b) return;
     var r = repo.filter(function (x) { return x.id === b.dataset.id; })[0];
     addSlide({ kind: r.kind, headline: r.headline || (r.title + ": [state your finding]"), body: (r.structure || []).slice(), visual: LAYOUT[r.kind], notes: "", evidence: { status: "needed", gap: "Add supporting data", source: "" } }, r.title);
-  });
-
-  /* ------------------------------------------------------------------ toolkit */
-  var toolkitLoaded = false;
-  async function loadToolkit() {
-    $("#toolGrid").innerHTML = loading("Loading the toolkit…");
-    try {
-      var items = (await Api.get("/api/toolkit")).items;
-      toolkitLoaded = true;
-      $("#toolGrid").innerHTML = items.map(function (t, i) {
-        return '<article class="panel tool"><h3>' + esc(t.name) + "</h3><p>" + esc(t.summary) + '</p><div class="example" id="ex-' + i + '" hidden><b>' + esc(t.when) + "</b><span>" + esc(t.example) + '</span></div><button class="btn btn-ghost" type="button" aria-expanded="false" aria-controls="ex-' + i + '">Show me an example</button></article>';
-      }).join("");
-    } catch (e) { $("#toolGrid").innerHTML = '<p class="empty">' + esc(e.message) + "</p>"; }
-  }
-  $("#toolGrid").addEventListener("click", function (e) {
-    var b = e.target.closest("button[aria-controls]"); if (!b) return;
-    var ex = document.getElementById(b.getAttribute("aria-controls"));
-    ex.hidden = !ex.hidden;
-    b.setAttribute("aria-expanded", String(!ex.hidden));
-    b.textContent = ex.hidden ? "Show me an example" : "Hide example";
   });
 
   /* ------------------------------------------------------------------ boot */

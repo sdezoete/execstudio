@@ -75,14 +75,12 @@ def run(brief, slides):
     checks.append({
         "ok": not too_long,
         "title": "Length fits the audience",
-        "detail": ("Board decks work best at 10 slides or fewer. Move detail to the appendix or use the executive summary version."
+        "detail": ("Board decks work best at 10 slides or fewer. Move detail to the appendix."
                    if too_long else "%d slide%s suits %s." % (n, "" if n == 1 else "s", aud["label"].lower())),
     })
 
     t = template(brief["template"])
     checks.append({"ok": True, "title": "Approved template applied", "detail": t["name"] + " masters, fonts and colours."})
-    checks.append({"ok": True, "title": "Confidentiality label set",
-                   "detail": "Every slide footer is marked “%s”." % brief["classification"]})
     return {"checks": checks, "range": [lo, hi]}
 
 

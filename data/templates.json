@@ -2,14 +2,14 @@
   "default": "corporate",
   "templates": [
     {
-      "id": "corporate", "name": "Corporate Master v4",
+      "id": "corporate", "name": "Corporate Master",
       "file": "corporate.potx",
       "layouts": {"title": "Title Slide", "content": "Title Only"},
       "title_size": 28,
       "accent": "1F47C9", "ink": "1A2421", "muted": "5A6763", "tile": "EDF1EF", "warn": "D9822B", "font": "Calibri"
     },
     {
-      "id": "board", "name": "Board Pack 2026",
+      "id": "board", "name": "Board Pack",
       "file": "board.potx",
       "layouts": {"title": "Title Slide", "content": "Title Only"},
       "title_size": 28,

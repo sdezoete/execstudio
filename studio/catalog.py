@@ -1,4 +1,4 @@
-"""Reference data: slide kinds, audiences, classifications, templates, repository and toolkit.
+"""Reference data: slide kinds, audiences, templates, repository and toolkit.
 
 Templates, repository and toolkit live in data/*.json so the presentation team can
 maintain them without touching code.
@@ -37,9 +37,6 @@ AUDIENCES = [
                  "and how success is measured. Plain language."},
 ]
 AUDIENCE_BY_ID = {a["id"]: a for a in AUDIENCES}
-
-CLASSIFICATIONS = ["Public", "Internal", "Confidential", "Restricted"]
-DEFAULT_CLASSIFICATION = "Confidential"
 
 LENGTHS = {"short": (1, 3), "mid": (5, 10), "long": (10, 20)}
 

@@ -21,7 +21,7 @@ import mock_llm  # noqa: E402
 
 BRIEF = {"task": "new", "topic": "Q3 business performance review", "decision": "Approve a 3% mid-market price increase",
          "facts": "Revenue +4% vs plan. Gross margin -1.8 pts.", "audience": "board", "length": "mid",
-         "source": "docs", "classification": "Confidential", "template": "corporate"}
+         "source": "docs", "template": "corporate"}
 
 
 def _start(server):

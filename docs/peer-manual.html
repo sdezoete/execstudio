@@ -1,0 +1,158 @@
+<title>Executive Presentation Studio — Try it out</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1d23;
+    --muted: #5b6270;
+    --border: #e4e7ec;
+    --card: #f7f8fa;
+    --accent: #3451d1;
+    --accent-bg: #eef0fd;
+    --warn-bg: #fff4e5;
+    --warn-border: #f0b429;
+    --warn-fg: #7a4a00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15171c;
+      --fg: #e8e9ec;
+      --muted: #9aa1ad;
+      --border: #2a2d35;
+      --card: #1c1f26;
+      --accent: #8ca2ff;
+      --accent-bg: #1f2642;
+      --warn-bg: #2b2210;
+      --warn-border: #a5720a;
+      --warn-fg: #f0c674;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #15171c; --fg: #e8e9ec; --muted: #9aa1ad; --border: #2a2d35;
+    --card: #1c1f26; --accent: #8ca2ff; --accent-bg: #1f2642;
+    --warn-bg: #2b2210; --warn-border: #a5720a; --warn-fg: #f0c674;
+  }
+  :root[data-theme="light"] {
+    --bg: #ffffff; --fg: #1a1d23; --muted: #5b6270; --border: #e4e7ec;
+    --card: #f7f8fa; --accent: #3451d1; --accent-bg: #eef0fd;
+    --warn-bg: #fff4e5; --warn-border: #f0b429; --warn-fg: #7a4a00;
+  }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.55;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 4rem;
+  }
+  h1 { font-size: 1.6rem; margin-bottom: 0.25rem; }
+  .sub { color: var(--muted); margin-top: 0; margin-bottom: 1.5rem; }
+  .linkcard {
+    background: var(--accent-bg);
+    border: 1px solid var(--accent);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.75rem;
+  }
+  .linkcard a {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--accent);
+    word-break: break-all;
+    text-decoration: none;
+  }
+  .linkcard a:hover { text-decoration: underline; }
+  .linkcard .note { color: var(--muted); font-size: 0.85rem; margin-top: 0.4rem; }
+  h2 {
+    font-size: 1.05rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.4rem;
+    margin-top: 2.25rem;
+  }
+  .warn {
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-border);
+    color: var(--warn-fg);
+    border-radius: 10px;
+    padding: 0.9rem 1.1rem;
+    margin: 1rem 0;
+    font-size: 0.95rem;
+  }
+  .warn b { display: block; margin-bottom: 0.2rem; }
+  ol, ul { padding-left: 1.3rem; }
+  li { margin-bottom: 0.6rem; }
+  li b { color: var(--fg); }
+  code {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.1rem 0.35rem;
+    font-size: 0.9em;
+  }
+  footer {
+    margin-top: 3rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+</style>
+
+<h1>Executive Presentation Studio</h1>
+<p class="sub">A quick trial for the team — turn a brief into an executive-ready slide deck.</p>
+
+<div class="linkcard">
+  <a href="https://holidays-bracelet-spelling-nothing.trycloudflare.com" target="_blank" rel="noopener">https://holidays-bracelet-spelling-nothing.trycloudflare.com</a>
+  <div class="note">Temporary preview link — it stops working once the demo session ends. If it won't load, ping the person who sent you this.</div>
+</div>
+
+<div class="warn">
+  <b>⚠ This preview uses a real cloud AI model (OpenAI), not our internal model.</b>
+  Don't paste real confidential, financial, or customer data in — use realistic-but-fake numbers for testing.
+</div>
+
+<div class="warn">
+  <b>⚠ There's no login on this preview.</b>
+  Anyone with the link can use it — fine for this trial, just don't share the link outside the team.
+</div>
+
+<h2>What this is</h2>
+<p>A tool that turns a short brief (topic, audience, key facts) into an executive-style, <b>answer-first</b> slide storyline — then exports it as an editable PowerPoint deck. It can also take an existing deck and restructure, simplify, or re-template it.</p>
+
+<h2>How to try it</h2>
+<ol>
+  <li>Open the link above. You'll land on <b>Presentation studio</b> with a form on the left.</li>
+  <li>Pick a task — for a first try, use <b>Generate a new presentation</b>.</li>
+  <li>Fill in the brief:
+    <ul>
+      <li><b>Presentation topic</b> — e.g. "Q3 business performance review"</li>
+      <li><b>Decision you need from the audience</b> — be explicit, e.g. "Approve a 3% mid-market price increase"</li>
+      <li><b>Key facts and context</b> (optional, but recommended) — paste a few made-up figures or findings. The AI only uses numbers you give it; it won't invent any.</li>
+      <li><b>Target audience</b> — CEO/Board, EVP/Senior, Functional, or Operational.</li>
+      <li><b>Deck length</b> — 1–3, 5–10, or 10–20 slides.</li>
+    </ul>
+  </li>
+  <li>Click <b>Design my presentation</b>. In a few seconds you'll get a slide-by-slide storyline: each slide has an action-title headline, a suggested layout/visual, and speaker notes.</li>
+  <li>Explore the tabs above the storyline:
+    <ul>
+      <li><b>Quality check</b> — flags weak headlines, missing evidence, or anything needing a real number.</li>
+      <li><b>Q&amp;A preparation</b> — anticipates tough questions, with suggested answers.</li>
+      <li><b>Export</b> — download an editable <code>.pptx</code>, plus an optional one-page executive brief and Q&amp;A appendix.</li>
+    </ul>
+  </li>
+  <li>Try <b>Improve an existing deck</b> to see it restructure or simplify a PowerPoint you already have.</li>
+  <li>Try <b>Slide advisor</b> (left sidebar) — describe a message you need to communicate, and it recommends the best slide layout for it.</li>
+</ol>
+
+<h2>What to give feedback on</h2>
+<ul>
+  <li>Does the storyline actually read as answer-first and executive-ready?</li>
+  <li>Is the recommended slide layout (driver tree, matrix, roadmap, etc.) the right call for your content?</li>
+  <li>How's the exported PowerPoint — does it open cleanly and look professional?</li>
+  <li>Anything confusing in the workflow?</li>
+</ul>
+
+<footer>Questions or feedback? Reply to whoever sent you this link.</footer>

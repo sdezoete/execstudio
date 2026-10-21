@@ -37,7 +37,7 @@ DEFAULTS = {
     "llm_base_url": "http://localhost:8000/v1",
     "llm_api_key": "",
     "llm_model": "deepseek-4.1-flash",
-    "llm_display_name": "DeepSeek 4.1 Flash",
+    "llm_display_name": "ARIF",
     "llm_timeout": 120,
     "llm_temperature": 0.3,
     "llm_max_tokens": 4096,
@@ -97,5 +97,5 @@ def load():
         cfg["llm_base_url"] = "https://api.openai.com/v1"
         cfg["llm_api_key"] = os.environ["OPENAI_API_KEY"]
         cfg["llm_model"] = os.environ.get("OPENAI_MODEL", "gpt-5.4-mini")
-        cfg["llm_display_name"] = cfg["llm_model"] + " (OpenAI, dev placeholder for DeepSeek)"
+        cfg["llm_display_name"] = "ARIF"
     return cfg

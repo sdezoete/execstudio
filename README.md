@@ -167,7 +167,7 @@ Recommended extensions are **Python** and **Python Debugger**, both from Microso
 - the headline in each slide's real title placeholder
 - native shapes for scorecards, driver trees, matrices, roadmaps and risk maps
 - **native, editable charts** whenever numbers are available, either because the AI found them in uploaded data or because the user entered them in a slide's *Chart data* box
-- speaker notes, and the confidentiality label in every footer and in the file properties
+- speaker notes in every slide
 
 ### Using your corporate templates
 
@@ -225,7 +225,7 @@ If DeepSeek is unreachable, every AI feature falls back to built-in rules. The i
 - **No invented numbers.** The prompts tell the model to use only figures the user supplies; anything missing becomes a `[placeholder]`. The quality check flags placeholders, and the slide footer marks missing evidence.
 - **Charts only from real data.** The AI may add a chart only when the numbers are in the provided material.
 - **Uploaded files and slide text are treated as data, not instructions.** This guards against prompt injection hidden in documents.
-- **Audit log.** `logs\audit.log` records each action as JSON lines. It holds metadata only (time, action, label, template, AI or rules, duration) and never content.
+- **Audit log.** `logs\audit.log` records each action as JSON lines. It holds metadata only (time, action, template, AI or rules, duration) and never content.
 - **Short-lived uploads.** Uploaded decks are kept in `work\` under random ids and deleted automatically.
 - **HTTPS only in production.** The server uses your organisation's certificate, refuses self-signed and expired certificates, requires TLS 1.2 or newer, and sends HSTS. The certificate and its password sit in `certs\`, which only Administrators and SYSTEM can read.
 - **Browser security.** A strict Content-Security-Policy is set and every asset is served from this server.

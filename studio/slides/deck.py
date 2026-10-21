@@ -352,7 +352,6 @@ def retemplate(data, indices, changes, tpl, meta, template_path):
         report.append({"index": i, "changes": changes_done + carried, "warnings": warnings})
     cp = prs.core_properties
     cp.title = meta.get("title", "")[:250]
-    cp.keywords = cp.category = meta["classification"]
     cp.last_modified_by = "Executive Presentation Studio"
     buf = io.BytesIO()
     prs.save(buf)

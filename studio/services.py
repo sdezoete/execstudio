@@ -49,7 +49,7 @@ class Studio:
             return
         rec = {"ts": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"), "action": action}
         if brief:
-            rec.update({"classification": brief.get("classification"), "template": brief.get("template"),
+            rec.update({"template": brief.get("template"),
                         "audience": brief.get("audience"), "task": brief.get("task")})
         rec.update(extra)
         with self._audit_lock, open(self.audit_path, "a", encoding="utf-8") as fh:
@@ -85,8 +85,6 @@ class Studio:
         t = catalog.templates()
         return {
             "audiences": [{"id": a["id"], "label": a["label"], "short": a["short"]} for a in catalog.AUDIENCES],
-            "classifications": catalog.CLASSIFICATIONS,
-            "default_classification": catalog.DEFAULT_CLASSIFICATION,
             "templates": [{"id": x["id"], "name": x["name"]} for x in t["templates"]],
             "default_template": t["default"],
             "kinds": catalog.KINDS,
@@ -204,7 +202,7 @@ class Studio:
 
     def _meta(self, b, title=""):
         tpl = catalog.template(b["template"])
-        return tpl, {"classification": b["classification"], "template_name": tpl["name"], "title": title,
+        return tpl, {"template_name": tpl["name"], "title": title,
                      "audience": catalog.AUDIENCE_BY_ID[b["audience"]]["label"],
                      "date": _dt.date.today().strftime("%d %B %Y")}
 
@@ -332,8 +330,8 @@ class Studio:
         title = str(payload.get("title") or b["topic"] or "Presentation")[:200]
         inc = payload.get("include") if isinstance(payload.get("include"), dict) else {}
         out = ["# " + title, "",
-               "_%s · %s · %s_" % (b["classification"], catalog.AUDIENCE_BY_ID[b["audience"]]["label"],
-                                   _dt.date.today().strftime("%d %B %Y")), ""]
+               "_%s · %s_" % (catalog.AUDIENCE_BY_ID[b["audience"]]["label"],
+                              _dt.date.today().strftime("%d %B %Y")), ""]
         if inc.get("brief"):
             def call():
                 system, user = prompts.briefing(b, title, slides)

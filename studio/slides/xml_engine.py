@@ -1,9 +1,8 @@
 """Standard-library .pptx writer: the fallback engine when python-pptx is not installed.
 
 Builds the Office Open XML package by hand (one master, one blank layout, native
-shapes and text boxes, speaker notes, a classification label in every footer).
-It cannot draw native charts or use a corporate .pptx template; the python-pptx
-engine (pptx_engine.py) does both.
+shapes and text boxes, speaker notes). It cannot draw native charts or use a
+corporate .pptx template; the python-pptx engine (pptx_engine.py) does both.
 """
 import datetime as _dt
 import io
@@ -100,7 +99,7 @@ AREA = (0.6, 1.75, 12.13, 4.75)
 
 
 def _footer(c, idx, total, meta, slide=None):
-    c.text(0.55, 7.02, 6, 0.35, meta["classification"].upper() + "  ·  " + meta["template_name"], size=9, color=c.colors["muted"])
+    c.text(0.55, 7.02, 6, 0.35, meta["template_name"], size=9, color=c.colors["muted"])
     if idx:
         c.text(11.7, 7.02, 1.05, 0.35, "%d / %d" % (idx, total), size=9, color=c.colors["muted"], align="r")
     ev = (slide or {}).get("evidence") or {}
@@ -196,7 +195,7 @@ def _rels(items):
 
 
 def build(title, slides, meta, tpl):
-    """Return .pptx bytes. meta: classification, template_name, audience, date, author."""
+    """Return .pptx bytes. meta: template_name, audience, date, author."""
     n = len(slides)
     files = {}
     notes_ctx = XmlCanvas(tpl)
@@ -255,10 +254,9 @@ def build(title, slides, meta, tpl):
         XML_HEAD + '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" '
         'xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" '
         'xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">'
-        "<dc:title>%s</dc:title><dc:creator>%s</dc:creator><cp:keywords>%s</cp:keywords><cp:category>%s</cp:category>"
+        "<dc:title>%s</dc:title><dc:creator>%s</dc:creator>"
         '<dcterms:created xsi:type="dcterms:W3CDTF">%s</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">%s</dcterms:modified>'
-        "</cp:coreProperties>") % (esc(title), esc(meta.get("author", "Executive Presentation Studio")),
-                                   esc(meta["classification"]), esc(meta["classification"]), now, now)
+        "</cp:coreProperties>") % (esc(title), esc(meta.get("author", "Executive Presentation Studio")), now, now)
     files["docProps/app.xml"] = (
         XML_HEAD + '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">'
         "<Application>Executive Presentation Studio</Application><Slides>%d</Slides><Notes>%d</Notes>"

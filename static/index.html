@@ -12,10 +12,9 @@
   <div class="brand">
     <span class="brand-mark" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 14 14"><rect x="1" y="2" width="12" height="8" rx="1" class="bm-stroke"/><rect x="6" y="10" width="2" height="3" class="bm-fill"/></svg></span>
     Executive Presentation Studio
+    <span class="ver">1.0.1</span>
   </div>
   <div class="gov" aria-label="Governance settings">
-    <label for="classif">Label <select id="classif"></select></label>
-    <label for="tmpl">Template <select id="tmpl"></select></label>
     <span class="pill" id="modelPill" title="AI model status">Checking AI…</span>
   </div>
 </header>
@@ -24,8 +23,7 @@
   <nav class="rail" aria-label="Main">
     <button type="button" data-view="studio" aria-current="page"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="9" rx="1.5" class="ic"/><path d="M5 14h6" class="ic"/></svg>Presentation studio</button>
     <button type="button" data-view="advisor"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5a4.5 4.5 0 0 0-2.5 8.2V12h5V9.7A4.5 4.5 0 0 0 8 1.5Z" class="ic"/><path d="M6 14.5h4" class="ic"/></svg>Slide advisor</button>
-    <button type="button" data-view="repo"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" class="ic"/><path d="m10.5 10.5 3.5 3.5" class="ic"/></svg>Slide repository</button>
-    <button type="button" data-view="toolkit"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1" class="ic"/><rect x="9" y="1.5" width="5.5" height="5.5" rx="1" class="ic"/><rect x="1.5" y="9" width="5.5" height="5.5" rx="1" class="ic"/><rect x="9" y="9" width="5.5" height="5.5" rx="1" class="ic"/></svg>Toolkit</button>
+    <button type="button" data-view="repo"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" class="ic"/><path d="m10.5 10.5 3.5 3.5" class="ic"/></svg>Find Templates</button>
     <div class="rail-foot" id="railFoot">Checking the AI service…</div>
   </nav>
 
@@ -129,14 +127,6 @@
                 <h2 id="deckTitle">Your storyline will appear here</h2>
                 <div class="meta" id="deckMeta"></div>
               </div>
-              <div class="versions">
-                <span class="eyebrow">Audience version</span>
-                <div class="seg" role="radiogroup" aria-label="Audience version">
-                  <label class="choice"><input type="radio" name="ver" id="v-full" value="full" checked><span>Full deck</span></label>
-                  <label class="choice"><input type="radio" name="ver" id="v-sum" value="summary"><span>Executive summary</span></label>
-                  <label class="choice"><input type="radio" name="ver" id="v-brief" value="brief"><span>Decision brief</span></label>
-                </div>
-              </div>
             </div>
             <div class="tabs" role="tablist" aria-label="Deck views">
               <button type="button" role="tab" id="tab-story" aria-controls="panel-story" aria-selected="true" data-tab="story">Storyline</button>
@@ -204,18 +194,6 @@
       <div class="searchbar"><input class="text" id="repoSearch" type="search" placeholder="Search, e.g. “why did costs rise” or “roadmap”" aria-label="Search approved slides"></div>
       <div class="filters" id="repoFilters"></div>
       <div class="grid" id="repoGrid"></div>
-    </section>
-
-    <!-- TOOLKIT -->
-    <section id="view-toolkit" hidden>
-      <div class="view-head">
-        <div>
-          <div class="eyebrow">Enterprise presentation toolkit</div>
-          <h1>Standards, guides and assets</h1>
-          <p>The reusable library behind every generated deck. Open an example to see a component applied.</p>
-        </div>
-      </div>
-      <div class="grid" id="toolGrid"></div>
     </section>
   </main>
 </div>
