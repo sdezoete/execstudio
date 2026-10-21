@@ -217,10 +217,44 @@ class Studio:
         return {"name": name, "chars": len(text), "truncated": truncated, "text": text[:limit]}
 
     def _meta(self, b, title=""):
+        """Returns (tpl, meta, upload). upload is None for a library template, or
+        (file_bytes, is_potx) when the brief points at an ad-hoc uploaded one."""
+        fid = (b.get("template_file") or "").strip()
+        if fid:
+            try:
+                data, name = self.work.get(fid)
+            except KeyError as e:
+                raise schema.BadRequest("That uploaded template has expired. Upload it again.") from e
+            is_potx = name.lower().endswith(".potx")
+            tpl = dict(catalog.template(""), **slide_engine.theme_colors(data))  # house palette as the base, overridden by whatever the theme carries
+            tpl["name"] = Path(name).stem[:60] or "Uploaded template"
+            tpl["file"] = None
+            meta = {"template_name": tpl["name"], "title": title,
+                    "audience": catalog.AUDIENCE_BY_ID[b["audience"]]["label"],
+                    "date": _dt.date.today().strftime("%d %B %Y")}
+            return tpl, meta, (data, is_potx)
         tpl = catalog.template(b["template"])
         return tpl, {"template_name": tpl["name"], "title": title,
                      "audience": catalog.AUDIENCE_BY_ID[b["audience"]]["label"],
-                     "date": _dt.date.today().strftime("%d %B %Y")}
+                     "date": _dt.date.today().strftime("%d %B %Y")}, None
+
+    def template_upload(self, name, data):
+        """Store an ad-hoc uploaded .pptx/.potx to use as this brief's template, instead of
+        picking one from the library. Validated once here; theme colours are re-read (cheaply,
+        never raising) from the stored bytes on every export via _meta()."""
+        name = Path(name or "template.pptx").name[:200]
+        ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+        if ext not in ("pptx", "potx"):
+            raise schema.BadRequest("Upload a .pptx or .potx file.")
+        if not slide_engine.supports_custom_template():
+            raise schema.BadRequest("Using your own template needs python-pptx on the server. See README: Offline install.")
+        try:
+            slide_engine.validate_uploaded_template(data, ext == "potx")
+        except ValueError as e:
+            raise schema.BadRequest("This file could not be opened as a PowerPoint template. Check it opens in PowerPoint and try again.") from e
+        fid = self.work.put(data, name)
+        self.audit("template_upload", None, ext=ext)
+        return {"template_file": fid, "name": name, "colors": slide_engine.theme_colors(data)}
 
     def export_pptx(self, payload):
         b = schema.brief(payload.get("brief"))
@@ -228,8 +262,9 @@ class Studio:
         if not slides:
             raise schema.BadRequest("There are no slides to export.")
         title = str(payload.get("title") or b["topic"] or "Presentation")[:200]
-        tpl, meta = self._meta(b, title)
-        data = slide_engine.build(title, slides, meta, tpl)
+        tpl, meta, upload = self._meta(b, title)
+        template_bytes, template_is_potx = upload if upload else (None, False)
+        data = slide_engine.build(title, slides, meta, tpl, template_bytes, template_is_potx)
         self.audit("export_pptx", b, slides=len(slides), engine=slide_engine.ENGINE)
         return _filename(title, "pptx"), data
 
@@ -279,8 +314,10 @@ class Studio:
         stem = Path(name).stem
         try:
             if actions["retemplate"]:
-                tpl, meta = self._meta(b, stem)
-                out, report = deck_ops.retemplate(data, set(selected), changes, tpl, meta, slide_engine.template_path(tpl))
+                tpl, meta, upload = self._meta(b, stem)
+                template_bytes, template_is_potx = upload if upload else (None, False)
+                out, report = deck_ops.retemplate(data, set(selected), changes, tpl, meta, slide_engine.template_path(tpl),
+                                                   template_bytes, template_is_potx)
                 out_name = _filename(stem + " " + tpl["name"], "pptx")
             else:
                 out, report = deck_ops.apply_in_place(data, changes)

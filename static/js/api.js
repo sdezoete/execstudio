@@ -46,6 +46,15 @@
     }));
   }
 
+  /* Sends a .pptx/.potx to use as an ad-hoc template; returns {template_file, name, colors}. */
+  async function uploadTemplate(file) {
+    return parse(await fetch("/api/template/upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream", "X-Filename": encodeURIComponent(file.name) },
+      body: file
+    }));
+  }
+
   /* POSTs JSON (or GETs when body is null) and saves the file the server returns. */
   async function download(path, body, fallbackName) {
     var res = body === null ? await fetch(path) : await fetch(path, {
@@ -74,5 +83,5 @@
     return name;
   }
 
-  window.Api = { get: get, post: post, upload: upload, uploadDeck: uploadDeck, download: download };
+  window.Api = { get: get, post: post, upload: upload, uploadDeck: uploadDeck, uploadTemplate: uploadTemplate, download: download };
 })();

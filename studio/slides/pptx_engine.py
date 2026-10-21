@@ -33,11 +33,18 @@ TITLE_TYPES = (PP_PLACEHOLDER.TITLE, PP_PLACEHOLDER.CENTER_TITLE)
 
 # ------------------------------------------------------------------ template handling
 def open_template(path):
-    """Open a .pptx or .potx as an editable Presentation (python-pptx only reads .pptx natively)."""
+    """Open a registered library template (.pptx or .potx) by file path."""
     if path is None or not Path(path).exists():
         return default_template()
     data = Path(path).read_bytes()
-    if str(path).lower().endswith((".potx", ".potm")):
+    return open_template_bytes(data, str(path).lower().endswith((".potx", ".potm")))
+
+
+def open_template_bytes(data, is_potx=False):
+    """Open a .pptx or .potx already in memory as an editable Presentation, sample slides
+    removed (python-pptx only reads .pptx natively, so a .potx needs its content type swapped
+    first). Shared by the library path above and by an ad-hoc uploaded template."""
+    if is_potx:
         src = zipfile.ZipFile(io.BytesIO(data))
         out = io.BytesIO()
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:
@@ -50,6 +57,34 @@ def open_template(path):
     prs = Presentation(io.BytesIO(data))
     clear_slides(prs)
     return prs
+
+
+def theme_colors(data):
+    """Best-effort accent/ink colours read straight from the uploaded file's own theme1.xml, so
+    shapes the studio draws itself (KPI tiles, driver trees, charts...) stay roughly on-brand.
+    An uploaded file's theme is not guaranteed to be well-formed, so this never raises -- any
+    problem just means fewer colours get overridden from the default palette."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            xml = z.read("ppt/theme/theme1.xml")
+        ns = {"a": "http://schemas.openxmlformats.org/drawingml/2006/main"}
+        scheme = etree.fromstring(xml).find(".//a:clrScheme", ns)
+        out = {}
+        for tag, key in (("dk1", "ink"), ("accent1", "accent")):
+            el = scheme.find("a:" + tag, ns) if scheme is not None else None
+            if el is None:
+                continue
+            c = el.find("a:srgbClr", ns)
+            if c is not None:
+                val = c.get("val")
+            else:
+                c = el.find("a:sysClr", ns)
+                val = c.get("lastClr") if c is not None else None
+            if val:
+                out[key] = val.upper()
+        return out
+    except Exception:  # noqa: BLE001  malformed or absent theme: just use the default palette
+        return {}
 
 
 def default_template():
@@ -344,8 +379,8 @@ def write_notes(slide, notes, source=""):
 
 
 # ------------------------------------------------------------------ build
-def build(title, slides, meta, tpl, template_path=None):
-    prs = open_template(template_path)
+def build(title, slides, meta, tpl, template_path=None, template_bytes=None, template_is_potx=False):
+    prs = open_template_bytes(template_bytes, template_is_potx) if template_bytes is not None else open_template(template_path)
     lt_title = find_layout(prs, tpl, "title")
     lt_content = find_layout(prs, tpl, "content")
     total = len(slides)

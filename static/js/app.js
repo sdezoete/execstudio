@@ -34,6 +34,7 @@
     qa: null,
     board: null,
     previewMode: false,  // slide thumbnails: icon (false) or content preview (true)
+    templateFile: null,  // {template_file, name, colors} for an ad-hoc uploaded template, if any
     stages: ["todo", "todo", "todo", "todo", "todo", "todo"],
     busy: false,
     briefKey: "",         // fingerprint of the brief the versions were built from
@@ -69,7 +70,9 @@
       facts: $("#notesIn").value.trim(),
       audience: radio("aud"),
       length: radio("len"),
-      source: radio("src")
+      source: radio("src"),
+      template: radio("tplsrc") === "library" ? $("#tplLib").value : "",
+      template_file: radio("tplsrc") === "upload" && state.templateFile ? state.templateFile.template_file : ""
     };
   }
   function briefKey(b) {
@@ -87,6 +90,7 @@
       var b = brief();
       localStorage.setItem(STORE_KEY, JSON.stringify({
         brief: b, version: state.version, versions: state.versions, briefKey: state.briefKey, deck: state.deck,
+        templateFile: state.templateFile,
         files: state.files.filter(function (f) { return !f.error; })
       }));
     } catch (e) { /* storage full or blocked: the draft simply isn't kept */ }
@@ -103,6 +107,11 @@
     if (b.audience) setRadio("aud", b.audience);
     if (b.length) setRadio("len", b.length);
     if (b.source) setRadio("src", b.source);
+    if (b.template) $("#tplLib").value = b.template;
+    state.templateFile = d.templateFile || null;
+    setRadio("tplsrc", b.template_file && state.templateFile ? "upload" : "library");
+    updateTplVisibility();
+    renderTplStatus();
     state.files = d.files || [];
     state.versions = d.versions || {};
     state.version = d.version || "full";
@@ -119,6 +128,22 @@
     $("#audSeg").innerHTML = m.audiences.map(function (a, i) {
       return '<label class="choice"><input type="radio" name="aud" id="aud-' + i + '" value="' + esc(a.id) + '"' + (i === 0 ? " checked" : "") + '><span>' + esc(a.short) + "</span></label>";
     }).join("");
+    $("#tplLib").innerHTML = m.templates.map(function (t) {
+      return '<option value="' + esc(t.id) + '"' + (t.id === m.default_template ? " selected" : "") + ">" + esc(t.name) + "</option>";
+    }).join("");
+  }
+
+  /* ------------------------------------------------------------------ template picker */
+  function updateTplVisibility() {
+    var upload = radio("tplsrc") === "upload";
+    $("#tplLib").hidden = upload;
+    $("#tplDrop").hidden = !upload;
+  }
+  function renderTplStatus() {
+    var t = state.templateFile;
+    $("#tplStatus").innerHTML = t
+      ? 'Using <b>' + esc(t.name) + '</b>' + (t.colors && t.colors.accent ? ' <span class="swatch" style="background:#' + esc(t.colors.accent) + '"></span>' : "")
+      : "";
   }
 
   async function loadHealth() {
@@ -603,7 +628,8 @@
       renderXform();
     }
     if (t.name === "src") $("#dropzone").hidden = t.value === "scratch" && state.files.length === 0;
-    if (t.id !== "files") save();
+    if (t.name === "tplsrc") updateTplVisibility();
+    if (t.id !== "files" && t.id !== "tplFile") save();
   });
   $("#briefForm").addEventListener("input", function (e) { if (e.target.classList.contains("text")) save(); });
 
@@ -633,6 +659,22 @@
     save();
   });
 
+  $("#tplFile").addEventListener("change", async function (e) {
+    var f = e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    $("#tplStatus").textContent = "Uploading " + f.name + "…";
+    try {
+      state.templateFile = await Api.uploadTemplate(f);
+      renderTplStatus();
+      toast("Using " + state.templateFile.name + " as the template.");
+    } catch (err) {
+      state.templateFile = null;
+      $("#tplStatus").innerHTML = '<span class="err">' + esc(err.message) + "</span>";
+    }
+    save();
+  });
+
   function renderFiles() {
     $("#fileList").innerHTML = state.files.map(function (f, i) {
       var status = f.pending ? "Reading…" : f.error ? '<span class="err">' + esc(f.error) + "</span>" :
@@ -651,9 +693,10 @@
     $("#briefForm").reset();
     $("#topic").value = ""; $("#decision").value = ""; $("#notesIn").value = "";
     state.files = []; state.versions = {}; state.briefKey = ""; state.review = null; state.qa = null; state.board = null; state.version = "full";
-    state.deck = null; state.xformResult = null;
+    state.deck = null; state.xformResult = null; state.templateFile = null;
     state.stages = ["todo", "todo", "todo", "todo", "todo", "todo"];
     $("#dropzone").hidden = true; $("#lenField").hidden = false; $("#go").textContent = "Design my presentation";
+    $("#tplStatus").textContent = ""; updateTplVisibility();
     renderFiles(); renderPipeline(); renderDeck(); renderXform(); selectTab("story"); save();
     $("#topic").focus();
   });

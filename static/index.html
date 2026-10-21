@@ -87,6 +87,19 @@
               <ul class="filelist" id="fileList"></ul>
             </div>
           </div>
+          <div class="field">
+            <span class="lbl">Template</span>
+            <div class="seg" role="radiogroup" aria-label="Template source">
+              <label class="choice"><input type="radio" name="tplsrc" id="ts-lib" value="library" checked><span>Approved library</span></label>
+              <label class="choice"><input type="radio" name="tplsrc" id="ts-up" value="upload"><span>Upload my own</span></label>
+            </div>
+            <select class="text" id="tplLib" aria-label="Approved template"></select>
+            <div class="drop" id="tplDrop" hidden>
+              <label for="tplFile" class="drop-lbl">Add a template file <small>.pptx .potx</small></label>
+              <input type="file" id="tplFile" accept=".pptx,.potx">
+              <p class="note" id="tplStatus"></p>
+            </div>
+          </div>
           <p class="form-error" id="briefError" role="alert" hidden></p>
           <button class="btn btn-primary" type="submit" id="go">Design my presentation</button>
         </form>

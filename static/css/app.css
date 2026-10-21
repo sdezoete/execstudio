@@ -101,6 +101,8 @@ textarea.text{resize:vertical}
 .filelist .err{color:var(--crit)}
 .filelist button{all:unset;cursor:pointer;color:var(--muted);font-size:12px;padding:0 4px}
 .filelist button:hover{color:var(--crit)}
+.swatch{display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:middle;box-shadow:0 0 0 1px var(--line)}
+#tplStatus .err{color:var(--crit)}
 .form-error{margin:0;color:var(--crit);background:var(--crit-soft);border-radius:6px;padding:8px 10px;font-size:13px}
 .btn{all:unset;box-sizing:border-box;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:6px;padding:10px 16px;font-weight:600;font-size:14px}
 .btn-primary{background:var(--accent);color:var(--accent-ink)}

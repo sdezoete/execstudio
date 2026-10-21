@@ -101,6 +101,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._guard(self._extract)
         if path == "/api/deck/upload":
             return self._guard(self._deck_upload)
+        if path == "/api/template/upload":
+            return self._guard(self._template_upload)
         if path == "/api/export/pptx":
             return self._guard(lambda: self._file(*self.studio.export_pptx(self._read_json()),
                                                   ctype="application/vnd.openxmlformats-officedocument.presentationml.presentation"))
@@ -122,6 +124,12 @@ class Handler(BaseHTTPRequestHandler):
         data = self._read_body(limit, "The file is larger than %d MB." % self.studio.cfg["max_upload_mb"])
         name = urllib.parse.unquote(self.headers.get("X-Filename", "deck.pptx"))
         self._json(self.studio.deck_upload(name, data))
+
+    def _template_upload(self):
+        limit = int(self.studio.cfg["max_upload_mb"]) * 1024 * 1024
+        data = self._read_body(limit, "The file is larger than %d MB." % self.studio.cfg["max_upload_mb"])
+        name = urllib.parse.unquote(self.headers.get("X-Filename", "template.pptx"))
+        self._json(self.studio.template_upload(name, data))
 
     def _guard(self, fn):
         try:

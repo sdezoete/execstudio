@@ -267,10 +267,11 @@ def _fit(aspect, w, h):
     return w, w / aspect
 
 
-def retemplate(data, indices, changes, tpl, meta, template_path):
-    """Rebuild the selected slides on the corporate template. Returns (bytes, report)."""
+def retemplate(data, indices, changes, tpl, meta, template_path, template_bytes=None, template_is_potx=False):
+    """Rebuild the selected slides on the corporate template (or an uploaded one, if
+    template_bytes is given). Returns (bytes, report)."""
     src = open_deck(data)
-    prs = eng.open_template(template_path)
+    prs = eng.open_template_bytes(template_bytes, template_is_potx) if template_bytes is not None else eng.open_template(template_path)
     layout = eng.find_layout(prs, tpl, "content")
     selected = [(i, s) for i, s in enumerate(src.slides, 1) if i in indices]
     total = len(selected)

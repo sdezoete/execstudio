@@ -31,6 +31,7 @@ def brief(raw):
         "length": raw.get("length") if raw.get("length") in LENGTHS else "mid",
         "source": raw.get("source") if raw.get("source") in SOURCES else "scratch",
         "template": _s(raw.get("template"), 60),
+        "template_file": _s(raw.get("template_file"), 40),  # workspace id of an ad-hoc uploaded template, if any
     }
     return b
 

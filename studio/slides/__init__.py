@@ -26,10 +26,26 @@ def template_path(tpl):
     return path
 
 
-def build(title, slides, meta, tpl):
+def build(title, slides, meta, tpl, template_bytes=None, template_is_potx=False):
     if pptx_engine is not None:
-        return pptx_engine.build(title, slides, meta, tpl, template_path(tpl))
-    return xml_engine.build(title, slides, meta, tpl)
+        return pptx_engine.build(title, slides, meta, tpl, template_path(tpl), template_bytes, template_is_potx)
+    return xml_engine.build(title, slides, meta, tpl)  # no capability to honour an uploaded template without python-pptx
+
+
+def supports_custom_template():
+    return pptx_engine is not None
+
+
+def validate_uploaded_template(data, is_potx):
+    """Raises ValueError if the file can't be opened as a PowerPoint template. Call once, at
+    upload time; theme_colors() below is cheap and safe to call again on every export."""
+    if pptx_engine is None:
+        raise ValueError("python-pptx is not installed on the server.")
+    pptx_engine.open_template_bytes(data, is_potx)
+
+
+def theme_colors(data):
+    return pptx_engine.theme_colors(data) if pptx_engine is not None else {}
 
 
 def status():
