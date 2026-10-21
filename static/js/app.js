@@ -33,6 +33,7 @@
     reviewStale: true,
     qa: null,
     board: null,
+    previewMode: false,  // slide thumbnails: icon (false) or content preview (true)
     stages: ["todo", "todo", "todo", "todo", "todo", "todo"],
     busy: false,
     briefKey: "",         // fingerprint of the brief the versions were built from
@@ -178,12 +179,17 @@
       srcChip
     ].join("");
 
-    $("#panel-story").innerHTML = '<ol class="slides">' + v.slides.map(function (s, i) {
+    $("#panel-story").innerHTML =
+      '<div class="slideview" role="radiogroup" aria-label="Slide display">' +
+        '<button type="button" data-view="icon" aria-pressed="' + !state.previewMode + '">Icons</button>' +
+        '<button type="button" data-view="preview" aria-pressed="' + state.previewMode + '">Preview</button>' +
+      "</div>" +
+      '<ol class="slides' + (state.previewMode ? " preview" : "") + '">' + v.slides.map(function (s, i) {
       var ev = s.evidence || {};
       var linked = ev.status === "linked";
       return '<li class="slide-row" data-i="' + i + '">' +
         '<span class="n num">' + String(i + 1).padStart(2, "0") + "</span>" +
-        thumb(s.kind) +
+        (state.previewMode ? window.Thumbs.preview(s) : thumb(s.kind)) +
         '<div class="body">' +
           '<textarea class="headline" rows="1" id="h-' + i + '" data-f="headline" aria-label="Headline for slide ' + (i + 1) + '">' + esc(s.headline) + "</textarea>" +
           '<div class="tags"><span class="chip">' + esc(LAYOUT[s.kind] || s.kind) + "</span>" + (s.visual ? '<span class="chip">' + esc(s.visual) + "</span>" : "") + (s.chart ? '<span class="chip acc">Native chart · ' + s.chart.series.length + " series</span>" : "") + "</div>" +
@@ -237,6 +243,8 @@
   });
 
   $("#panel-story").addEventListener("click", async function (e) {
+    var view = e.target.closest("button[data-view]");
+    if (view) { state.previewMode = view.dataset.view === "preview"; renderDeck(); return; }
     var btn = e.target.closest("button[data-act]"); if (!btn) return;
     var i = +btn.closest(".slide-row").dataset.i;
     var slides = current().slides;

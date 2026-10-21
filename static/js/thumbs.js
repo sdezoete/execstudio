@@ -8,6 +8,29 @@
     risk: "Risk heat map", table: "Data table"
   };
 
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  /* A simple, content-populated stand-in for the slide: real headline and bullets,
+     laid out the same way for every kind. Not a layout-accurate render of the final
+     PowerPoint (that stays in python-pptx/layouts.py) -- just enough to read the slide
+     at a glance instead of an abstract icon. No new dependencies, nothing server-side. */
+  function preview(s) {
+    s = s || {};
+    var body = (s.body || []).slice(0, 4);
+    var visual = s.visual || LAYOUT[s.kind] || "";
+    return '<div class="slide-preview" role="img" aria-label="Slide preview">' +
+      '<div class="pv-acc"></div>' +
+      '<div class="pv-body">' +
+        '<div class="pv-head">' + esc(s.headline) + "</div>" +
+        (body.length ? '<ul class="pv-list">' + body.map(function (b) { return "<li>" + esc(b) + "</li>"; }).join("") + "</ul>" : "") +
+        (visual ? '<div class="pv-visual">' + esc(visual) + "</div>" : "") +
+      "</div></div>";
+  }
+
   function svg(kind) {
     var head = '<rect class="s-ink" x="10" y="9" width="104" height="6" rx="1"/><rect class="s-mute" x="10" y="18" width="62" height="3" rx="1"/>';
     var foot = '<rect class="s-mute" x="10" y="82" width="28" height="2.4" rx="1"/><rect class="s-mute" x="136" y="82" width="14" height="2.4" rx="1"/>';
@@ -72,5 +95,5 @@
     }
   }
 
-  window.Thumbs = { svg: svg, LAYOUT: LAYOUT };
+  window.Thumbs = { svg: svg, preview: preview, LAYOUT: LAYOUT };
 })();
