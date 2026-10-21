@@ -5,7 +5,8 @@ documents as data rather than instructions.
 """
 import json
 
-from .catalog import AUDIENCE_BY_ID, KINDS, slide_range
+from .catalog import (AUDIENCE_BY_ID, BOARD_EXTERNAL_ONLY, BOARD_READINESS_DIMENSIONS, BOARD_RULES,
+                       KINDS, PRESENTATION_TYPES, STAGE_GATES, slide_range)
 
 _KIND_LIST = ", ".join('"%s" (%s)' % (k, v) for k, v in KINDS.items())
 
@@ -176,4 +177,55 @@ def briefing(brief, title, slides):
         'Return JSON only: {"brief": string}'
     )
     user = _brief_block(brief, "") + "\n\nDECK TITLE\n" + title + "\n\nDECK\n" + _slides_block(slides)
+    return system, user
+
+
+def board_assessment(brief, slides, ctx):
+    """GEC/GIC Presentation Assessment Rules: a deterministic compliance check first, an
+    executive board-readiness score second. SUB-01 is excluded: it is computed from the
+    submission/meeting dates in services.py rather than asked of the model."""
+    rules_text = "\n".join(
+        "- %s [%s]%s: %s" % (r["id"], r["category"], " (CRITICAL)" if r.get("critical") else "", r["requirement"])
+        for r in BOARD_RULES if r["id"] != "SUB-01"
+    )
+    external_ids = ", ".join(sorted(BOARD_EXTERNAL_ONLY))
+    dims_text = "\n".join("- %s: %s" % (d["id"], d["label"]) for d in BOARD_READINESS_DIMENSIONS)
+
+    ctx_lines = []
+    if ctx.get("presentation_type"):
+        ctx_lines.append("Presentation type: " + PRESENTATION_TYPES.get(ctx["presentation_type"], ctx["presentation_type"]))
+    if ctx.get("stage_gate"):
+        ctx_lines.append("Stage/Gate: " + STAGE_GATES.get(ctx["stage_gate"], ctx["stage_gate"]))
+    if ctx.get("ook_investment"):
+        ctx_lines.append("OOK (outside the Kingdom) investment: " + ctx["ook_investment"])
+    ctx_block = "\n".join(ctx_lines) or "No additional context was supplied by the presenter."
+
+    system = (
+        "You are a GEC/GIC Presentation Compliance Reviewer, assessing an executive presentation against the "
+        "GEC/GIC Engagement Checklist (Saudi Aramco's Group Executive Committee / Group Improvement Committee).\n\n"
+        "For every requirement below, return exactly one result: PASS, FAIL, WARNING, \"NOT VERIFIABLE\", or "
+        "\"NOT APPLICABLE\". Never assume compliance when evidence is absent, and never mark a requirement PASS "
+        "merely because the presentation claims compliance without showing it.\n\n"
+        "These requirements depend on submission paperwork, sign-offs or consultations outside this presentation, "
+        "and this tool has no record of them: " + external_ids + ". For these, you may NEVER return PASS or FAIL. "
+        "Return NOT APPLICABLE when the requirement clearly does not apply (state why in evidence); otherwise "
+        "return NOT VERIFIABLE.\n\n"
+        "REQUIREMENTS (assess each individually):\n" + rules_text + "\n\n"
+        "CONTEXT SUPPLIED BY THE PRESENTER:\n" + ctx_block + "\n\n"
+        "For PRES-01 (15-minute limit), estimate delivery time from slide count and content density if no timing "
+        "is given, and say in evidence that it is an estimate.\n"
+        "For PRES-05, evaluate every slide title individually; a title fails if it merely names a subject (e.g. "
+        "'Financial Analysis') rather than stating a finding (e.g. 'Project generates a 14% IRR'). Name the "
+        "slide numbers that fail.\n"
+        "For PRES-03 and PRES-08, check that the opening and closing requested actions are consistent with each "
+        "other and with the brief's stated decision.\n"
+        "Cite slide number(s) in \"evidence\" for every content-based result. For every FAIL or WARNING, state "
+        "the minimum change needed to reach PASS in \"action\" (leave action empty for PASS/NOT APPLICABLE).\n\n"
+        "SEPARATELY, score BOARD READINESS 1 (poor) to 5 (excellent) for each dimension below, with a one-sentence "
+        "comment explaining the score:\n" + dims_text + "\n\n"
+        "Then write a 2-3 sentence overall summary covering both the compliance outcome and board readiness.\n\n"
+        'Return JSON only: {"compliance": [{"id": string, "result": string, "evidence": string, "action": string}], '
+        '"board_readiness": {"<dimension id>": {"score": number, "comment": string}}, "summary": string}'
+    )
+    user = _brief_block(brief, "") + "\n\nDECK\n" + _slides_block(slides)
     return system, user

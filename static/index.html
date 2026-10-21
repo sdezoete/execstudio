@@ -132,11 +132,40 @@
               <button type="button" role="tab" id="tab-story" aria-controls="panel-story" aria-selected="true" data-tab="story">Storyline</button>
               <button type="button" role="tab" id="tab-qa" aria-controls="panel-qa" aria-selected="false" data-tab="qa">Quality check <span class="count" id="qaCount" hidden></span></button>
               <button type="button" role="tab" id="tab-prep" aria-controls="panel-prep" aria-selected="false" data-tab="prep">Q&amp;A preparation</button>
+              <button type="button" role="tab" id="tab-board" aria-controls="panel-board" aria-selected="false" data-tab="board">Board assessment <span class="count" id="boardCount" hidden></span></button>
               <button type="button" role="tab" id="tab-export" aria-controls="panel-export" aria-selected="false" data-tab="export">Export</button>
             </div>
             <div class="tabpanel" id="panel-story" role="tabpanel" aria-labelledby="tab-story"></div>
             <div class="tabpanel" id="panel-qa" role="tabpanel" aria-labelledby="tab-qa" hidden></div>
             <div class="tabpanel" id="panel-prep" role="tabpanel" aria-labelledby="tab-prep" hidden></div>
+            <div class="tabpanel" id="panel-board" role="tabpanel" aria-labelledby="tab-board" hidden>
+              <form class="boardctx" id="boardCtxForm">
+                <label>Presentation type<select id="bc-type">
+                  <option value="">Not specified</option>
+                  <option value="cms">CMS</option>
+                  <option value="transaction">Transactions / M&amp;A / Divestiture</option>
+                  <option value="other">Other</option>
+                </select></label>
+                <label>Stage/Gate<select id="bc-gate">
+                  <option value="">Not specified</option>
+                  <option value="gate0">Gate 0</option>
+                  <option value="gate1">Gate I</option>
+                  <option value="gate2">Gate II</option>
+                  <option value="gate3">Gate III</option>
+                  <option value="gate_alt">Gate Alternative Selection</option>
+                  <option value="na">N/A</option>
+                </select></label>
+                <label>OOK investment<select id="bc-ook">
+                  <option value="">Not specified</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select></label>
+                <label>Submission date<input type="date" id="bc-sub"></label>
+                <label>Meeting date<input type="date" id="bc-meet"></label>
+                <button class="btn btn-primary" type="submit" id="boardGo">Run board assessment</button>
+              </form>
+              <div id="boardResult"><p class="empty">Set any context you know (optional) and select “Run board assessment” to check this storyline against the GEC/GIC checklist and score its board readiness.</p></div>
+            </div>
             <div class="tabpanel" id="panel-export" role="tabpanel" aria-labelledby="tab-export" hidden>
               <div class="export">
                 <label class="opt"><input type="checkbox" id="x-pptx" checked disabled><span><b>Editable PowerPoint (.pptx)</b><span id="xTemplate">Built on the approved template.</span></span></label>

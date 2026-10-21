@@ -1,5 +1,6 @@
 """Validation and normalisation of data coming from the browser or the LLM."""
-from .catalog import AUDIENCE_BY_ID, KINDS, LENGTHS
+from .catalog import (AUDIENCE_BY_ID, BOARD_EXTERNAL_ONLY, BOARD_READINESS_DIMENSIONS, BOARD_RULES,
+                       KINDS, LENGTHS, PRESENTATION_TYPES, STAGE_GATES)
 
 TASKS = ("new", "improve", "single", "find")
 SOURCES = ("scratch", "docs", "deck")
@@ -115,3 +116,56 @@ def storyline(raw, fallback_title):
     if not sl:
         raise ValueError("no slides")
     return {"title": _s(raw.get("title"), 200) or fallback_title, "slides": sl}
+
+
+# --------------------------------------------------------------- GEC/GIC board assessment
+BOARD_RESULTS = ("PASS", "FAIL", "WARNING", "NOT VERIFIABLE", "NOT APPLICABLE")
+
+
+def board_context(raw):
+    if not isinstance(raw, dict):
+        raw = {}
+    return {
+        "presentation_type": raw.get("presentation_type") if raw.get("presentation_type") in PRESENTATION_TYPES else "",
+        "stage_gate": raw.get("stage_gate") if raw.get("stage_gate") in STAGE_GATES else "",
+        "ook_investment": raw.get("ook_investment") if raw.get("ook_investment") in ("yes", "no") else "",
+        "submission_date": _s(raw.get("submission_date"), 10),
+        "meeting_date": _s(raw.get("meeting_date"), 10),
+    }
+
+
+def board_result(raw):
+    """Normalise the LLM's board-assessment JSON into the canonical shape. Fields that are
+    missing or malformed become a safe default (NOT VERIFIABLE / unscored); raises ValueError
+    only if the model engaged with neither section at all, so the caller falls back to rules."""
+    if not isinstance(raw, dict):
+        raise ValueError("not an object")
+    by_id = {str(it.get("id")): it for it in (raw.get("compliance") or []) if isinstance(it, dict) and it.get("id")}
+    if not by_id and not isinstance(raw.get("board_readiness"), dict):
+        raise ValueError("empty board assessment")
+    compliance = []
+    for rule in BOARD_RULES:
+        if rule["id"] == "SUB-01":
+            continue  # computed separately in services.py, from the supplied dates
+        it = by_id.get(rule["id"], {})
+        result = it.get("result") if it.get("result") in BOARD_RESULTS else "NOT VERIFIABLE"
+        if rule["id"] in BOARD_EXTERNAL_ONLY and result in ("PASS", "FAIL"):
+            result = "NOT VERIFIABLE"  # no evidence pipeline exists for sign-offs/consultations/templates
+        compliance.append({
+            "id": rule["id"], "category": rule["category"], "requirement": rule["requirement"],
+            "critical": bool(rule.get("critical")), "result": result,
+            "evidence": _s(it.get("evidence"), 500), "action": _s(it.get("action"), 400),
+        })
+
+    raw_scores = raw.get("board_readiness") if isinstance(raw.get("board_readiness"), dict) else {}
+    readiness = []
+    for dim in BOARD_READINESS_DIMENSIONS:
+        d = raw_scores.get(dim["id"]) if isinstance(raw_scores.get(dim["id"]), dict) else {}
+        try:
+            score = int(d.get("score"))
+            score = max(1, min(5, score))
+        except (TypeError, ValueError):
+            score = None
+        readiness.append({"id": dim["id"], "label": dim["label"], "score": score, "comment": _s(d.get("comment"), 300)})
+
+    return {"compliance": compliance, "board_readiness": readiness, "summary": _s(raw.get("summary"), 800)}

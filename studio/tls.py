@@ -156,9 +156,16 @@ def _describe_pem(path):
             "self_signed": d.get("subject") == d.get("issuer"), "source": str(path)}
 
 
-def client_context(ca_file=""):
-    """SSL context for outgoing calls (DeepSeek over HTTPS). Uses the Windows trust store plus an optional CA file."""
+def client_context(ca_file="", verify=True):
+    """SSL context for outgoing calls to the LLM endpoint (DeepSeek direct, or the corporate MaaS
+    gateway). Uses the Windows trust store plus an optional CA file, or disables verification
+    entirely when the gateway's certificate can't be validated normally -- this is LLM_VERIFY_SSL
+    in the Central LLM Client guide, which recommends 'false' for the corporate MaaS endpoint."""
     ctx = ssl.create_default_context()
+    if not verify:
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
     if ca_file:
         p = _path(ca_file)
         if not p.exists():

@@ -68,6 +68,7 @@ class Handler(BaseHTTPRequestHandler):
         "/api/storyline": "storyline",
         "/api/review": "review",
         "/api/qa": "qa",
+        "/api/board-assessment": "board_assessment",
         "/api/advise": "advise",
         "/api/sharpen": "sharpen",
         "/api/deck/transform": "deck_transform",

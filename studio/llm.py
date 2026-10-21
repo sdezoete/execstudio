@@ -1,4 +1,7 @@
-"""Client for the on-premise LLM (DeepSeek) over an OpenAI-compatible API.
+"""Client for the configured LLM endpoint over an OpenAI-compatible API: the real
+endpoint is either OpenAI (DEVELOPMENT=True, see config.py) or the corporate Aramco
+MaaS gateway running DeepSeek V4.1 Flash (DEVELOPMENT=False) -- both speak the same
+chat-completions wire contract, so one client handles either without changes here.
 
 Standard library only. Every public call raises LLMError on any failure so the
 API layer can fall back to built-in rules instead of failing the user.
@@ -44,7 +47,8 @@ class LLMClient:
         handlers = [urllib.request.ProxyHandler({})] if cfg.get("llm_ignore_proxy", True) else []
         if self.base.startswith("https://"):
             from .tls import client_context
-            handlers.append(urllib.request.HTTPSHandler(context=client_context(cfg.get("llm_ca_file", ""))))
+            handlers.append(urllib.request.HTTPSHandler(
+                context=client_context(cfg.get("llm_ca_file", ""), cfg.get("llm_verify_ssl", True))))
         self.opener = urllib.request.build_opener(*handlers)
         self._json_mode = bool(cfg.get("llm_json_mode", True))
         self._token_param = "max_tokens"  # some newer models (e.g. OpenAI's gpt-5/o-series) require max_completion_tokens
@@ -73,7 +77,8 @@ class LLMClient:
     # 400/422 are deliberately excluded so chat()'s response_format renegotiation still runs.
     _RETRYABLE_HTTP = {401, 403, 408, 429, 500, 502, 503, 504}
 
-    def _post(self, path, body, timeout, attempts=8):
+    def _post(self, path, body, timeout, attempts=None):
+        attempts = int(self.cfg.get("llm_max_retries", 5)) if attempts is None else attempts
         data = json.dumps(body).encode("utf-8")
         for attempt in range(attempts):
             try:
@@ -103,6 +108,12 @@ class LLMClient:
                 self._token_param: tokens,
                 "stream": False,
             }
+            if self.cfg.get("llm_top_p") not in (None, ""):
+                b["top_p"] = self.cfg["llm_top_p"]
+            if self.cfg.get("llm_top_k") not in (None, ""):
+                b["top_k"] = self.cfg["llm_top_k"]
+            if self.cfg.get("llm_reasoning_effort"):
+                b["reasoning_effort"] = self.cfg["llm_reasoning_effort"]
             if use_json:
                 b["response_format"] = {"type": "json_object"}
             return b
@@ -145,7 +156,7 @@ class LLMClient:
                       "detail": "The AI service is switched off in the server settings."}
         else:
             last_err = None
-            attempts = 8
+            attempts = int(self.cfg.get("llm_max_retries", 5))
             for attempt in range(attempts):
                 try:
                     req = urllib.request.Request(self.base + "/models", headers=self._headers())

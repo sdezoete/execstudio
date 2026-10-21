@@ -5,7 +5,7 @@ They never invent facts: they produce a well-structured skeleton with
 """
 import re
 
-from .catalog import AUDIENCE_BY_ID, KINDS
+from .catalog import AUDIENCE_BY_ID, BOARD_READINESS_DIMENSIONS, BOARD_RULES, KINDS
 
 
 def _ev(gap=""):
@@ -165,3 +165,84 @@ def briefing(brief, title, slides):
 
 def kind_name(kind):
     return KINDS.get(kind, kind)
+
+
+# --------------------------------------------------------------------- GEC/GIC board assessment
+_WEAK_TITLE = re.compile(r"^(overview|update|summary|introduction|agenda|review|background|status|analysis)\b", re.I)
+_AGENDA_LIKE = re.compile(r"agenda|background|introduction", re.I)
+_POLITICAL_RISK = re.compile(r"political risk", re.I)
+
+
+def _nums(items):
+    items = [str(n) for n in items]
+    if len(items) == 1:
+        return items[0]
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def board_assessment(brief, slides, ctx):
+    """Structural, non-judgemental checks only. Title/message quality, board readiness and
+    everything requiring external evidence need the AI model; this is clearly labelled as
+    reduced-capability output via the 'rules' source the caller attaches."""
+    content = [s for s in slides if s.get("kind") != "title"]
+    lead, last = (content[0], content[-1]) if content else (None, None)
+    decision_text = bool((brief.get("decision") or "").strip())
+    ook = (ctx or {}).get("ook_investment", "")
+    results = {}
+
+    minutes = round(len(slides) * 1.5, 1)
+    results["PRES-01"] = ("PASS" if minutes <= 15 else "FAIL",
+                          "Built-in estimate: ~%s minutes for %d slides (not a measured timing)." % (minutes, len(slides)),
+                          "" if minutes <= 15 else "Cut slides or move detail to backup to fit the 15-minute limit.")
+
+    if not lead:
+        results["PRES-03"] = ("FAIL", "The deck has no content slides.", "Add an opening slide that states the requested action.")
+    elif lead["kind"] in ("summary", "decision") and decision_text:
+        results["PRES-03"] = ("PASS", "The opening content slide (%s) leads with the ask." % lead["kind"], "")
+    else:
+        results["PRES-03"] = ("WARNING", "The opening content slide is a %s slide; the requested GEC/GIC action was not confirmed." % (lead["kind"] if lead else "?"),
+                              "State explicitly what is required from GEC/GIC (approval, guidance or information).")
+
+    agenda = [i + 1 for i, s in enumerate(slides) if _AGENDA_LIKE.search(s.get("headline", ""))]
+    results["PRES-04"] = (("WARNING", "Slide%s %s read as agenda or background." % ("s" if len(agenda) > 1 else "", _nums(agenda)), "Remove or move to backup material.")
+                           if agenda else ("PASS", "No agenda or background-labelled slides detected.", ""))
+
+    weak = [i + 1 for i, s in enumerate(slides) if s.get("kind") != "title" and _WEAK_TITLE.search(s.get("headline", ""))]
+    results["PRES-05"] = (("WARNING", "Slide%s %s use a topic label rather than a key message (partial check only; AI review recommended for all titles)."
+                           % ("s" if len(weak) > 1 else "", _nums(weak)), "Rewrite as the slide's key finding.")
+                           if weak else ("WARNING", "No obvious topic-label titles found, but this built-in check cannot judge title quality the way the AI model can.", ""))
+
+    results["PRES-07"] = ("NOT VERIFIABLE", "A visual progress gauge cannot be confirmed without AI/visual review.", "")
+
+    if not last:
+        results["PRES-08"] = ("FAIL", "The deck has no content slides.", "Add a closing slide confirming the action sought.")
+    elif last["kind"] == "decision":
+        results["PRES-08"] = ("PASS", "The final content slide is a decision slide.", "")
+    else:
+        results["PRES-08"] = ("WARNING", "The final content slide is a %s slide." % last["kind"], "Close with a decision slide restating the ask.")
+
+    ook_mentioned = any(_POLITICAL_RISK.search(s.get("headline", "") + " " + " ".join(s.get("body") or [])) for s in slides)
+    if ook == "no":
+        results["PRES-09"] = results["COMP-09"] = ("NOT APPLICABLE", "Not an OOK investment.", "")
+    elif ook == "yes":
+        results["PRES-09"] = (("PASS", "Political Risk Framework content found.", "") if ook_mentioned else
+                               ("FAIL", "No Political Risk Framework content found.", "Add the Political Risk Framework section."))
+        results["COMP-09"] = ("NOT VERIFIABLE", "Consultation with the Investment Guidelines Group cannot be confirmed from the presentation.", "Provide confirmation of consultation.")
+    else:
+        results["PRES-09"] = results["COMP-09"] = ("WARNING", "OOK investment status was not specified.", "Specify whether this is an OOK investment.")
+
+    compliance = []
+    for rule in BOARD_RULES:
+        rid = rule["id"]
+        if rid == "SUB-01":
+            continue  # computed separately in services.py
+        result, evidence, action = results.get(rid, ("NOT VERIFIABLE",
+            "Requires information outside the presentation (submission records, sign-offs or consultations).",
+            "Confirm and document separately."))
+        compliance.append({"id": rid, "category": rule["category"], "requirement": rule["requirement"],
+                            "critical": bool(rule.get("critical")), "result": result, "evidence": evidence, "action": action})
+
+    readiness = [{"id": d["id"], "label": d["label"], "score": None, "comment": "Needs the AI model; not scored by built-in rules."}
+                 for d in BOARD_READINESS_DIMENSIONS]
+    return {"compliance": compliance, "board_readiness": readiness,
+            "summary": "Built-in rules give a partial, structural compliance check only. Connect the AI model for title-quality and board-readiness scoring."}

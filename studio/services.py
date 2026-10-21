@@ -140,6 +140,22 @@ class Studio:
         result.update(meta)
         return result
 
+    def board_assessment(self, payload):
+        b = schema.brief(payload.get("brief"))
+        slides = schema.slides(payload.get("slides"))
+        if not slides:
+            raise schema.BadRequest("There are no slides to assess.")
+        ctx = schema.board_context(payload.get("context"))
+
+        def call():
+            system, user = prompts.board_assessment(b, slides, ctx)
+            return schema.board_result(self.llm.chat_json(system, user, max_tokens=6000))
+
+        result, meta = self._ai("board_assessment", call, lambda: fallback.board_assessment(b, slides, ctx), b)
+        result["compliance"].insert(0, _sub01(ctx))
+        result.update(meta)
+        return result
+
     def advise(self, payload):
         message = str(payload.get("message") or "").strip()[:1500]
         if not message:
@@ -360,3 +376,38 @@ class Studio:
 def _filename(title, ext):
     slug = re.sub(r"[^\w\- ]+", "", title, flags=re.UNICODE).strip().replace(" ", "_")[:80] or "presentation"
     return "%s_%s.%s" % (slug, _dt.date.today().isoformat(), ext)
+
+
+_WEEKEND = {4, 5}  # Friday, Saturday: the Saudi Arabia working week is Sunday-Thursday.
+
+
+def _business_days_before(submission, meeting):
+    """Business days strictly between two ISO dates, or None if either is missing/invalid."""
+    try:
+        s, m = _dt.date.fromisoformat(submission), _dt.date.fromisoformat(meeting)
+    except (ValueError, TypeError):
+        return None
+    if m <= s:
+        return None
+    days, d = 0, s
+    while d < m:
+        d += _dt.timedelta(days=1)
+        if d.weekday() not in _WEEKEND:
+            days += 1
+    return days
+
+
+def _sub01(ctx):
+    """SUB-01's business-day lead time is arithmetic, not judgement: computed here rather than
+    asked of the LLM (or approximated by the fallback), and always inserted into the result."""
+    rule = catalog.BOARD_RULES_BY_ID["SUB-01"]
+    n = _business_days_before(ctx.get("submission_date"), ctx.get("meeting_date"))
+    if n is None:
+        result, evidence, action = "NOT VERIFIABLE", "Submission date and/or meeting date was not provided.", "Supply both dates to check this automatically."
+    elif n >= 6:
+        result, evidence, action = "PASS", "%d business day%s between submission and the meeting." % (n, "" if n == 1 else "s"), ""
+    else:
+        result, evidence, action = "FAIL", "Only %d business day%s between submission and the meeting; 6 or more are required." % (n, "" if n == 1 else "s"), \
+            "Submit at least 6 business days before the meeting date."
+    return {"id": "SUB-01", "category": rule["category"], "requirement": rule["requirement"], "critical": False,
+            "result": result, "evidence": evidence, "action": action}

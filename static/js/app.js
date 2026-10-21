@@ -32,6 +32,7 @@
     review: null,
     reviewStale: true,
     qa: null,
+    board: null,
     stages: ["todo", "todo", "todo", "todo", "todo", "todo"],
     busy: false,
     briefKey: "",         // fingerprint of the brief the versions were built from
@@ -382,7 +383,7 @@
     var key = briefKey(b);
     if (key !== state.briefKey) { state.versions = {}; state.briefKey = key; }
     state.busy = true;
-    state.review = null; state.qa = null; state.reviewStale = true;
+    state.review = null; state.qa = null; state.board = null; state.reviewStale = true;
     var go = $("#go"); busy(go, true, "Working…");
     state.stages = ["run", "todo", "todo", "todo", "todo", "todo"]; renderPipeline();
     delete state.versions[version];
@@ -470,12 +471,87 @@
   }
   $("#panel-prep").addEventListener("click", function (e) { if (e.target.id === "reqa") loadQA(true); });
 
+  /* ------------------------------------------------------------------ board assessment */
+  var RESULT_CLASS = { "PASS": "ok", "FAIL": "crit", "WARNING": "warn", "NOT VERIFIABLE": "", "NOT APPLICABLE": "na" };
+  function boardContext() {
+    return {
+      presentation_type: $("#bc-type").value, stage_gate: $("#bc-gate").value, ook_investment: $("#bc-ook").value,
+      submission_date: $("#bc-sub").value, meeting_date: $("#bc-meet").value,
+    };
+  }
+  async function runBoardAssessment() {
+    var v = current(); if (!v) return;
+    var panel = $("#boardResult"), btn = $("#boardGo");
+    busy(btn, true, "Assessing…");
+    panel.innerHTML = loading("Checking the GEC/GIC checklist and scoring board readiness…");
+    try {
+      state.board = await Api.post("/api/board-assessment", { brief: brief(), slides: v.slides, context: boardContext() });
+    } catch (e) {
+      state.board = null;
+      panel.innerHTML = '<p class="empty">' + esc(e.message) + "</p>";
+      busy(btn, false);
+      return;
+    }
+    renderBoard();
+    busy(btn, false);
+  }
+  function renderBoard() {
+    var v = current(), panel = $("#boardResult"), cnt = $("#boardCount");
+    if (!v) { panel.innerHTML = '<p class="empty">Generate a storyline first, then check it against the GEC/GIC checklist here.</p>'; cnt.hidden = true; return; }
+    var r = state.board;
+    if (!r) {
+      panel.innerHTML = '<p class="empty">Set any context you know (optional) and select “Run board assessment” to check this storyline against the GEC/GIC checklist and score its board readiness.</p>';
+      cnt.hidden = true;
+      return;
+    }
+    var fails = r.compliance.filter(function (c) { return c.result === "FAIL"; }).length;
+    cnt.hidden = false;
+    cnt.textContent = fails ? fails + " fail" + (fails > 1 ? "s" : "") : "checked";
+    cnt.className = "count" + (fails ? "" : " ok");
+
+    var scored = r.board_readiness.filter(function (d) { return d.score != null; });
+    var avg = scored.length ? scored.reduce(function (s, d) { return s + d.score; }, 0) / scored.length : null;
+
+    var cats = [];
+    r.compliance.forEach(function (c) { if (cats.indexOf(c.category) < 0) cats.push(c.category); });
+
+    var html = '<div class="panel-bar"><span class="note">' +
+      (r.source === "llm" ? "Assessed by " + esc(r.model || "the AI model") : "Built-in structural checks only (AI unavailable) — title quality and board readiness need the AI model") +
+      '</span><button class="btn btn-ghost" type="button" id="reboard">Re-run</button></div>';
+    if (r.warning) html += '<p class="note" style="padding:6px 20px 0">' + esc(r.warning) + "</p>";
+    if (r.summary) html += '<p class="note" style="padding:10px 20px 0;max-width:80ch">' + esc(r.summary) + "</p>";
+
+    html += '<div class="ready"><div class="eyebrow">Board readiness' + (avg != null ? " · " + avg.toFixed(1) + "/5" : "") + "</div>" +
+      r.board_readiness.map(function (d) {
+        var pct = d.score != null ? Math.round(d.score / 5 * 100) : 0;
+        return '<div class="ready-row"><span class="rlabel">' + esc(d.label) + '</span><div class="rmeter"><i style="width:' + pct + '%"></i></div>' +
+          '<span class="rscore">' + (d.score != null ? d.score + "/5" : "–") + "</span>" +
+          (d.comment ? '<p class="rcomment">' + esc(d.comment) + "</p>" : "") + "</div>";
+      }).join("") + "</div>";
+
+    html += cats.map(function (cat) {
+      var items = r.compliance.filter(function (c) { return c.category === cat; });
+      return '<div class="board-cat">' + esc(cat) + '</div><ul class="board-list">' + items.map(function (c) {
+        var cls = RESULT_CLASS[c.result] || "";
+        return '<li><div class="bid"><span class="chip ' + cls + '">' + esc(c.result) + '</span><span class="rid">' + esc(c.id) + '</span></div><div>' +
+          '<span class="req">' + esc(c.requirement) + (c.critical ? '<span class="crit-mark">Critical</span>' : "") + "</span>" +
+          (c.evidence ? '<span class="ev">' + esc(c.evidence) + "</span>" : "") +
+          (c.action ? '<span class="act">Action: ' + esc(c.action) + "</span>" : "") + "</div></li>";
+      }).join("") + "</ul>";
+    }).join("");
+
+    panel.innerHTML = html;
+  }
+  $("#panel-board").addEventListener("click", function (e) { if (e.target.id === "reboard") runBoardAssessment(); });
+  $("#boardCtxForm").addEventListener("submit", function (e) { e.preventDefault(); runBoardAssessment(); });
+
   /* ------------------------------------------------------------------ tabs */
   function selectTab(name) {
     $$(".tabs button").forEach(function (x) { x.setAttribute("aria-selected", String(x.dataset.tab === name)); });
-    ["story", "qa", "prep", "export"].forEach(function (t) { $("#panel-" + t).hidden = t !== name; });
+    ["story", "qa", "prep", "board", "export"].forEach(function (t) { $("#panel-" + t).hidden = t !== name; });
     if (name === "qa" && current() && (!state.review || state.reviewStale) && !state.busy) runReview();
     if (name === "prep") loadQA(false);
+    if (name === "board") renderBoard();
   }
   $$(".tabs button").forEach(function (b) { b.addEventListener("click", function () { selectTab(b.dataset.tab); }); });
 
@@ -566,7 +642,7 @@
   $("#newDeck").addEventListener("click", function () {
     $("#briefForm").reset();
     $("#topic").value = ""; $("#decision").value = ""; $("#notesIn").value = "";
-    state.files = []; state.versions = {}; state.briefKey = ""; state.review = null; state.qa = null; state.version = "full";
+    state.files = []; state.versions = {}; state.briefKey = ""; state.review = null; state.qa = null; state.board = null; state.version = "full";
     state.deck = null; state.xformResult = null;
     state.stages = ["todo", "todo", "todo", "todo", "todo", "todo"];
     $("#dropzone").hidden = true; $("#lenField").hidden = false; $("#go").textContent = "Design my presentation";
