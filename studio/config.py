@@ -127,7 +127,10 @@ def load():
 
     if _truthy(os.environ.get("DEVELOPMENT"), default=True):
         # This machine, with internet: OpenAI stands in for the real on-prem model.
-        if os.environ.get("OPENAI_API_KEY"):
+        # Skipped if something (tests, ops) already set STUDIO_LLM_BASE_URL explicitly --
+        # that must win, or there is no way to point this process at a mock/alternate
+        # endpoint while OPENAI_API_KEY also happens to be sitting in the environment.
+        if os.environ.get("OPENAI_API_KEY") and os.environ.get("STUDIO_LLM_BASE_URL") is None:
             cfg["llm_base_url"] = "https://api.openai.com/v1"
             cfg["llm_api_key"] = os.environ["OPENAI_API_KEY"]
             cfg["llm_model"] = os.environ.get("OPENAI_MODEL", "gpt-5.4-mini")

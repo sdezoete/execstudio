@@ -152,7 +152,8 @@ textarea.text{resize:vertical}
 .spinner{width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;flex:none}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-.slideview{display:flex;gap:6px;align-items:center;padding:10px 20px 0;justify-content:flex-end}
+.slideview{display:flex;gap:6px;align-items:center;padding:10px 20px;border-bottom:1px solid var(--line)}
+.slideview .svlbl{font-size:12px;color:var(--muted);margin-right:2px}
 .slideview button{all:unset;cursor:pointer;font-size:12px;color:var(--muted);padding:4px 10px;border-radius:999px;border:1px solid var(--line)}
 .slideview button:hover{color:var(--ink)}
 .slideview button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent);border-color:transparent}

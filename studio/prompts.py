@@ -19,7 +19,7 @@ _GROUNDING = (
 
 
 def _audience(brief):
-    return AUDIENCE_BY_ID.get(brief.get("audience"), AUDIENCE_BY_ID["board"])
+    return AUDIENCE_BY_ID.get(brief.get("audience"), AUDIENCE_BY_ID["executive"])
 
 
 def _brief_block(brief, context):

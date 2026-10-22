@@ -17,7 +17,7 @@ def storyline(brief, version):
     decision = (brief.get("decision") or "").strip()
     ask = decision or "[state the decision you need]"
     s = {
-        "title": {"kind": "title", "headline": topic, "body": [AUDIENCE_BY_ID.get(brief.get("audience"), AUDIENCE_BY_ID["board"])["label"]],
+        "title": {"kind": "title", "headline": topic, "body": [AUDIENCE_BY_ID.get(brief.get("audience"), AUDIENCE_BY_ID["executive"])["label"]],
                   "visual": "Cover", "notes": "Introduce the purpose of the session and the decision you will ask for.",
                   "evidence": {"status": "linked", "source": "Brief", "gap": ""}},
         "summary": {"kind": "summary", "headline": "[State the answer on %s in one sentence]" % topic,
@@ -68,8 +68,6 @@ def storyline(brief, version):
         order = ["title", "summary", "kpi", "matrix", "decision"]
     elif length == "short":
         order = ["summary", "decision"]
-    elif length == "long":
-        order = ["title", "summary", "kpi", "bars", "driver", "matrix", "decision", "roadmap", "risk", "appendix"]
     else:
         order = ["title", "summary", "kpi", "driver", "matrix", "decision", "roadmap"]
     slides = [dict(s[k], body=list(s[k]["body"]), evidence=dict(s[k]["evidence"])) for k in order]

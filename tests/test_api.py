@@ -20,7 +20,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 import mock_llm  # noqa: E402
 
 BRIEF = {"task": "new", "topic": "Q3 business performance review", "decision": "Approve a 3% mid-market price increase",
-         "facts": "Revenue +4% vs plan. Gross margin -1.8 pts.", "audience": "board", "length": "mid",
+         "facts": "Revenue +4% vs plan. Gross margin -1.8 pts.", "audience": "executive", "length": "mid",
          "source": "docs", "template": "corporate"}
 
 

@@ -27,7 +27,7 @@ def brief(raw):
         "topic": _s(raw.get("topic"), 300),
         "decision": _s(raw.get("decision"), 400),
         "facts": _s(raw.get("facts"), 8000),
-        "audience": raw.get("audience") if raw.get("audience") in AUDIENCE_BY_ID else "board",
+        "audience": raw.get("audience") if raw.get("audience") in AUDIENCE_BY_ID else "executive",
         "length": raw.get("length") if raw.get("length") in LENGTHS else "mid",
         "source": raw.get("source") if raw.get("source") in SOURCES else "scratch",
         "template": _s(raw.get("template"), 60),

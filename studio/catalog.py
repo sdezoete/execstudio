@@ -23,22 +23,18 @@ KINDS = {
 }
 
 AUDIENCES = [
-    {"id": "board", "label": "CEO / Board", "short": "CEO / Board",
-     "guidance": "CEO and board members. Lead with the decision and its business impact. "
-                 "Strategic, concise, no operational detail; move detail to the appendix. Ten slides at most."},
-    {"id": "evp", "label": "EVP / Senior leadership", "short": "EVP / Senior",
-     "guidance": "Executive vice presidents. Answer first, then the evidence and trade-offs. "
-                 "Show cross-functional impact and the resources required."},
-    {"id": "functional", "label": "Functional management", "short": "Functional",
-     "guidance": "Functional managers. More detail on plans, owners, timelines and metrics. "
-                 "Make actions and responsibilities explicit."},
-    {"id": "operational", "label": "Operational teams", "short": "Operational",
-     "guidance": "Operational teams. Practical and specific: what changes, who does what, by when, "
-                 "and how success is measured. Plain language."},
+    {"id": "executive", "label": "Executive", "short": "Executive",
+     "guidance": "CEO, board and senior leadership. Lead with the decision and its business impact; "
+                 "answer first, then the evidence and trade-offs. Strategic and concise -- move "
+                 "operational detail to the appendix. Ten slides at most."},
+    {"id": "operational", "label": "Operational", "short": "Operational",
+     "guidance": "Functional and operational teams. Detailed plans, owners, timelines and metrics; "
+                 "practical and specific about what changes, who does what, by when, and how success "
+                 "is measured. Plain language."},
 ]
 AUDIENCE_BY_ID = {a["id"]: a for a in AUDIENCES}
 
-LENGTHS = {"short": (1, 3), "mid": (5, 10), "long": (10, 20)}
+LENGTHS = {"short": (1, 3), "mid": (5, 10)}
 
 
 def _load(name, default):

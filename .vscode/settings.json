@@ -13,5 +13,11 @@
   "[css]": { "editor.tabSize": 2 },
   "[html]": { "editor.tabSize": 2 },
   "files.exclude": { "**/__pycache__": true },
-  "search.exclude": { "wheels": true, "work": true, "logs": true, ".venv": true }
+  "search.exclude": {
+    "wheels": true,
+    "work": true,
+    "logs": true,
+    ".venv": true
+  },
+  "python.terminal.useEnvFile": true
 }

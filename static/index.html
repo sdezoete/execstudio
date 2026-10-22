@@ -23,7 +23,7 @@
   <nav class="rail" aria-label="Main">
     <button type="button" data-view="studio" aria-current="page"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="9" rx="1.5" class="ic"/><path d="M5 14h6" class="ic"/></svg>Presentation studio</button>
     <button type="button" data-view="advisor"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5a4.5 4.5 0 0 0-2.5 8.2V12h5V9.7A4.5 4.5 0 0 0 8 1.5Z" class="ic"/><path d="M6 14.5h4" class="ic"/></svg>Slide advisor</button>
-    <button type="button" data-view="repo"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" class="ic"/><path d="m10.5 10.5 3.5 3.5" class="ic"/></svg>Find Templates</button>
+    <button type="button" data-view="repo"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" class="ic"/><path d="m10.5 10.5 3.5 3.5" class="ic"/></svg>Content Templates</button>
     <div class="rail-foot" id="railFoot">Checking the AI service…</div>
   </nav>
 
@@ -71,24 +71,19 @@
             <div class="seg" role="radiogroup" aria-label="Deck length">
               <label class="choice"><input type="radio" name="len" id="l-s" value="short"><span>1–3 slides</span></label>
               <label class="choice"><input type="radio" name="len" id="l-m" value="mid" checked><span>5–10 slides</span></label>
-              <label class="choice"><input type="radio" name="len" id="l-l" value="long"><span>10–20 slides</span></label>
             </div>
           </div>
           <div class="field">
             <span class="lbl">Content source</span>
-            <div class="seg" role="radiogroup" aria-label="Content source">
-              <label class="choice"><input type="radio" name="src" id="s-scratch" value="scratch" checked><span>From scratch</span></label>
-              <label class="choice"><input type="radio" name="src" id="s-docs" value="docs"><span>Data &amp; documents</span></label>
-              <label class="choice"><input type="radio" name="src" id="s-deck" value="deck"><span>Existing deck</span></label>
-            </div>
-            <div class="drop" id="dropzone" hidden>
+            <div class="drop" id="dropzone">
               <label for="files" class="drop-lbl">Add files <small id="fileTypes">.pptx .docx .xlsx .csv .txt .md</small></label>
               <input type="file" id="files" multiple accept=".pptx,.docx,.xlsx,.csv,.txt,.md">
               <ul class="filelist" id="fileList"></ul>
+              <p class="note">Nothing added? The studio builds the storyline from scratch.</p>
             </div>
           </div>
           <div class="field">
-            <span class="lbl">Template</span>
+            <span class="lbl">Presentation Templates</span>
             <div class="seg" role="radiogroup" aria-label="Template source">
               <label class="choice"><input type="radio" name="tplsrc" id="ts-lib" value="library" checked><span>Approved library</span></label>
               <label class="choice"><input type="radio" name="tplsrc" id="ts-up" value="upload"><span>Upload my own</span></label>

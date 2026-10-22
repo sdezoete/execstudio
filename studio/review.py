@@ -71,11 +71,11 @@ def run(brief, slides):
     aud = AUDIENCE_BY_ID[brief["audience"]]
     lo, hi = slide_range(brief["length"], "full", brief["task"])
     n = len(slides)
-    too_long = brief["audience"] == "board" and n > 10
+    too_long = brief["audience"] == "executive" and n > 10
     checks.append({
         "ok": not too_long,
         "title": "Length fits the audience",
-        "detail": ("Board decks work best at 10 slides or fewer. Move detail to the appendix."
+        "detail": ("Executive decks work best at 10 slides or fewer. Move detail to the appendix."
                    if too_long else "%d slide%s suits %s." % (n, "" if n == 1 else "s", aud["label"].lower())),
     })
 

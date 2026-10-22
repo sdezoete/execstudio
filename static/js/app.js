@@ -70,7 +70,7 @@
       facts: $("#notesIn").value.trim(),
       audience: radio("aud"),
       length: radio("len"),
-      source: radio("src"),
+      source: state.deck ? "deck" : (state.files.length ? "docs" : "scratch"),
       template: radio("tplsrc") === "library" ? $("#tplLib").value : "",
       template_file: radio("tplsrc") === "upload" && state.templateFile ? state.templateFile.template_file : ""
     };
@@ -106,7 +106,6 @@
     $("#notesIn").value = b.facts || "";
     if (b.audience) setRadio("aud", b.audience);
     if (b.length) setRadio("len", b.length);
-    if (b.source) setRadio("src", b.source);
     if (b.template) $("#tplLib").value = b.template;
     state.templateFile = d.templateFile || null;
     setRadio("tplsrc", b.template_file && state.templateFile ? "upload" : "library");
@@ -206,6 +205,7 @@
 
     $("#panel-story").innerHTML =
       '<div class="slideview" role="radiogroup" aria-label="Slide display">' +
+        '<span class="svlbl">Slide view</span>' +
         '<button type="button" data-view="icon" aria-pressed="' + !state.previewMode + '">Icons</button>' +
         '<button type="button" data-view="preview" aria-pressed="' + state.previewMode + '">Preview</button>' +
       "</div>" +
@@ -624,10 +624,8 @@
       var labels = { "new": "Design my presentation", improve: "Restructure my presentation", single: "Design my slide", find: "Open slide repository" };
       $("#go").textContent = labels[t.value];
       $("#lenField").hidden = t.value === "single";
-      if (t.value === "improve") { setRadio("src", "deck"); $("#dropzone").hidden = false; }
       renderXform();
     }
-    if (t.name === "src") $("#dropzone").hidden = t.value === "scratch" && state.files.length === 0;
     if (t.name === "tplsrc") updateTplVisibility();
     if (t.id !== "files" && t.id !== "tplFile") save();
   });
@@ -695,7 +693,7 @@
     state.files = []; state.versions = {}; state.briefKey = ""; state.review = null; state.qa = null; state.board = null; state.version = "full";
     state.deck = null; state.xformResult = null; state.templateFile = null;
     state.stages = ["todo", "todo", "todo", "todo", "todo", "todo"];
-    $("#dropzone").hidden = true; $("#lenField").hidden = false; $("#go").textContent = "Design my presentation";
+    $("#lenField").hidden = false; $("#go").textContent = "Design my presentation";
     $("#tplStatus").textContent = ""; updateTplVisibility();
     renderFiles(); renderPipeline(); renderDeck(); renderXform(); selectTab("story"); save();
     $("#topic").focus();
@@ -792,7 +790,6 @@
     catch (e) { toast("Cannot reach the studio server: " + e.message, true); }
     var restored = restore();
     if (!restored) $("#topic").value = "";
-    $("#dropzone").hidden = radio("src") === "scratch" && state.files.length === 0;
     $("#lenField").hidden = radio("task") === "single";
     renderFiles();
     renderPipeline();
