@@ -44,23 +44,47 @@
 
   /* ------------------------------------------------------------------ helpers */
   var toastTimer;
-  function toast(msg, isErr) {
+  /* action: optional { label, fn } shown as a button in the toast (e.g. Undo); it stays up 8 s. */
+  function toast(msg, isErr, action) {
     var t = $("#toast");
     t.textContent = msg;
+    if (action) {
+      var b = document.createElement("button");
+      b.type = "button"; b.className = "toast-act"; b.textContent = action.label;
+      b.addEventListener("click", function () { t.hidden = true; action.fn(); });
+      t.appendChild(b);
+    }
     t.classList.toggle("err", !!isErr);
     t.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { t.hidden = true; }, isErr ? 6000 : 3800);
+    toastTimer = setTimeout(function () { t.hidden = true; }, action ? 8000 : isErr ? 6000 : 3800);
   }
   function radio(name) { var el = $('input[name="' + name + '"]:checked'); return el ? el.value : ""; }
   function setRadio(name, value) { var el = $('input[name="' + name + '"][value="' + value + '"]'); if (el) el.checked = true; }
   function autosize(t) { t.style.height = "auto"; t.style.height = t.scrollHeight + "px"; }
+  /* Marks a button busy and returns true, or returns false when it already is: callers bail out on
+     false, so a double-click can't fire a second request or save "Thinking…" as the real label. */
   function busy(btn, on, label) {
-    if (!btn) return;
-    if (on) { btn.dataset.label = btn.textContent; btn.setAttribute("aria-busy", "true"); if (label) btn.textContent = label; }
-    else { btn.removeAttribute("aria-busy"); if (btn.dataset.label) btn.textContent = btn.dataset.label; }
+    if (!btn) return true;
+    if (on) {
+      if (btn.getAttribute("aria-busy") === "true") return false;
+      btn.dataset.label = btn.textContent; btn.setAttribute("aria-busy", "true"); btn.disabled = true;
+      if (label) btn.textContent = label;
+    } else {
+      btn.removeAttribute("aria-busy"); btn.disabled = false;
+      if (btn.dataset.label) { btn.textContent = btn.dataset.label; delete btn.dataset.label; }
+    }
+    return true;
   }
-  function loading(text) { return '<div class="loading"><span class="spinner" aria-hidden="true"></span>' + esc(text) + "</div>"; }
+  function loading(text) { return '<div class="loading"><span class="spinner" aria-hidden="true"></span>' + esc(text) + elapsed() + "</div>"; }
+  /* A live seconds counter for long calls; one timer updates every counter on the page. */
+  function elapsed() { return '<span class="elapsed" data-t0="' + Date.now() + '"></span>'; }
+  setInterval(function () {
+    $$(".elapsed").forEach(function (el) {
+      var s = Math.round((Date.now() - +el.dataset.t0) / 1000);
+      el.textContent = s >= 3 ? " " + s + " s" : "";
+    });
+  }, 1000);
 
   function brief() {
     return {
@@ -225,7 +249,7 @@
             '<label for="c-' + i + '">Chart data (creates a native, editable chart)<textarea class="text" rows="3" id="c-' + i + '" data-f="chart" placeholder="Q1, Q2, Q3&#10;Plan: 110, 118, 125&#10;Actual: 108, 121, 130">' + esc(chartToText(s.chart)) + '</textarea><span class="chartnote" id="cn-' + i + '">First line: categories. Then one line per series: name, then values.</span></label>' +
           "</div></details>" +
         "</div>" +
-        '<div><div class="status">' + (linked ? '<span class="dot"></span>Evidence linked' : '<span class="dot warn"></span>' + esc(ev.gap || "Evidence needed")) + "</div>" +
+        '<div class="side"><div class="status">' + (linked ? '<span class="dot"></span>Evidence linked' : '<span class="dot warn"></span>' + esc(ev.gap || "Evidence needed")) + "</div>" +
         '<div class="slide-actions">' +
           '<button type="button" class="icon-btn" data-act="sharpen" title="Rewrite the headline as an executive action title">Sharpen</button>' +
           '<button type="button" class="icon-btn" data-act="up" aria-label="Move slide up"' + (i === 0 ? " disabled" : "") + ">↑</button>" +
@@ -276,9 +300,14 @@
     var act = btn.dataset.act;
     if (act === "up" && i > 0) { slides.splice(i - 1, 0, slides.splice(i, 1)[0]); }
     else if (act === "down" && i < slides.length - 1) { slides.splice(i + 1, 0, slides.splice(i, 1)[0]); }
-    else if (act === "del") { slides.splice(i, 1); toast("Slide removed."); }
+    else if (act === "del") {
+      var removed = slides.splice(i, 1)[0], from = slides;
+      toast("Slide " + (i + 1) + " removed.", false, { label: "Undo", fn: function () {
+        from.splice(Math.min(i, from.length), 0, removed); markEdited(); renderDeck(); toast("Slide restored.");
+      } });
+    }
     else if (act === "sharpen") {
-      busy(btn, true, "…");
+      if (!busy(btn, true, "…")) return;
       try {
         var r = await Api.post("/api/sharpen", { headline: slides[i].headline, body: slides[i].body, brief: brief() });
         if (r.headline && r.headline !== slides[i].headline) { slides[i].headline = r.headline; toast(r.source === "llm" ? "Headline rewritten." : "AI unavailable: headline tidied with built-in rules."); }
@@ -371,13 +400,14 @@
     if (!d.selected.length) { toast("Select at least one slide.", true); return; }
     var actions = { headlines: $("#xa-head").checked, simplify: $("#xa-simp").checked, retemplate: $("#xa-tpl").checked };
     if (!actions.headlines && !actions.simplify && !actions.retemplate) { toast("Choose at least one change to make.", true); return; }
-    var btn = this; busy(btn, true, "Transforming " + d.selected.length + " slide" + (d.selected.length > 1 ? "s" : "") + "…");
+    var btn = this; if (!busy(btn, true, "Transforming " + d.selected.length + " slide" + (d.selected.length > 1 ? "s" : "") + "…")) return;
     $("#xformReport").innerHTML = loading("Working through the slides. Large decks can take a minute.");
     try {
       state.xformResult = await Api.post("/api/deck/transform", { deck_id: d.id, selected: d.selected, actions: actions, brief: brief() });
       renderXformReport();
-      await Api.download("/api/download/" + state.xformResult.file_id, null, state.xformResult.filename);
-      toast("Downloaded " + state.xformResult.filename + ".");
+      var nWarn = state.xformResult.report.reduce(function (n, x) { return n + x.warnings.length; }, 0);
+      toast(nWarn ? "Done, with " + nWarn + " warning" + (nWarn > 1 ? "s" : "") + ". Review the report, then download."
+                  : "Done. Review the changes, then download.", nWarn > 0);
     } catch (e) {
       $("#xformReport").innerHTML = '<p class="empty">' + esc(e.message) + "</p>";
       toast(e.message, true);
@@ -389,7 +419,7 @@
     var r = state.xformResult, box = $("#xformReport");
     if (!r) { box.innerHTML = ""; return; }
     box.innerHTML = '<div class="report-head"><span><b>Change report</b> <span class="note">' + esc(r.note) +
-      (r.source === "rules" ? " AI unavailable: built-in rules were used." : "") + '</span></span><button type="button" class="btn btn-ghost" id="xformDl">Download again</button></div>' +
+      (r.source === "rules" ? " AI unavailable: built-in rules were used." : "") + '</span></span><button type="button" class="btn btn-primary" id="xformDl">Download ' + esc(r.filename) + "</button></div>" +
       '<ol class="xreport">' + r.report.map(function (x) {
         var changed = x.after && x.after !== x.before;
         return '<li><span class="n num">' + String(x.index).padStart(2, "0") + "</span><div>" +
@@ -405,12 +435,20 @@
   });
 
   /* ------------------------------------------------------------------ generate */
+  /* Shows (or, with "", clears) the brief error and ties it to the topic field for screen readers. */
+  function briefError(msg) {
+    var err = $("#briefError"), topic = $("#topic");
+    err.textContent = msg; err.hidden = !msg;
+    if (msg) { topic.setAttribute("aria-invalid", "true"); topic.setAttribute("aria-describedby", "briefError"); }
+    else { topic.removeAttribute("aria-invalid"); topic.removeAttribute("aria-describedby"); }
+  }
+  $("#topic").addEventListener("input", function () { if (this.value.trim()) briefError(""); });
+
   async function generate(version, opts) {
     opts = opts || {};
     var b = brief();
-    var err = $("#briefError");
-    if (!b.topic) { err.textContent = "Add a presentation topic so the AI knows what to build."; err.hidden = false; $("#topic").focus(); return; }
-    err.hidden = true;
+    if (!b.topic) { briefError("Add a presentation topic so the AI knows what to build."); $("#topic").focus(); return; }
+    briefError("");
     if (state.busy) return;
 
     var key = briefKey(b);
@@ -515,7 +553,14 @@
   async function runBoardAssessment() {
     var v = current(); if (!v) return;
     var panel = $("#boardResult"), btn = $("#boardGo");
-    busy(btn, true, "Assessing…");
+    var sub = $("#bc-sub").value, meet = $("#bc-meet").value;
+    if (sub && meet && meet < sub) {
+      $("#bc-meet").setAttribute("aria-invalid", "true");
+      panel.innerHTML = '<p class="empty" role="alert">The meeting date is before the submission date. Check both dates.</p>';
+      $("#bc-meet").focus();
+      return;
+    }
+    if (!busy(btn, true, "Assessing…")) return;
     panel.innerHTML = loading("Checking the GEC/GIC checklist and scoring board readiness…");
     try {
       state.board = await Api.post("/api/board-assessment", { brief: brief(), slides: v.slides, context: boardContext() });
@@ -577,6 +622,7 @@
   }
   $("#panel-board").addEventListener("click", function (e) { if (e.target.id === "reboard") runBoardAssessment(); });
   $("#boardCtxForm").addEventListener("submit", function (e) { e.preventDefault(); runBoardAssessment(); });
+  $("#boardCtxForm").addEventListener("input", function () { $("#bc-meet").removeAttribute("aria-invalid"); });
 
   /* ------------------------------------------------------------------ tabs */
   function selectTab(name) {
@@ -592,17 +638,18 @@
   $("#exportBtn").addEventListener("click", async function () {
     var v = current();
     if (!v) { toast("Generate a storyline first.", true); return; }
-    var btn = this; busy(btn, true, "Preparing files…");
+    var btn = this; if (!busy(btn, true, "Preparing files…")) return;
     setStage(5, "run");
     var b = brief();
     try {
-      var name = await Api.download("/api/export/pptx", { brief: b, title: v.title, slides: v.slides }, "presentation.pptx");
+      var file = await Api.download("/api/export/pptx", { brief: b, title: v.title, slides: v.slides }, "presentation.pptx");
+      var name = file.name, notice = file.notice ? " " + file.notice : "";
       var want = { notes: $("#x-notes").checked, brief: $("#x-brief").checked, qa: $("#x-qa").checked };
       if (want.notes || want.brief || want.qa) {
         if (want.qa && !state.qa) { try { state.qa = await Api.post("/api/qa", { brief: b, slides: v.slides }); } catch (e) { /* pack goes without Q&A */ } }
         await Api.download("/api/export/briefing", { brief: b, title: v.title, slides: v.slides, include: want, qa: state.qa ? state.qa.questions : [] }, "briefing.md");
-        toast("Downloaded " + name + " and the briefing pack.");
-      } else toast("Downloaded " + name + ".");
+        toast("Downloaded " + name + " and the briefing pack." + notice, !!notice);
+      } else toast("Downloaded " + name + "." + notice, !!notice);
       setStage(5, "done");
     } catch (e) {
       setStage(5, "fail");
@@ -618,14 +665,17 @@
     generate("full");
   });
 
+  /* Button label and length field follow the selected task: on change, after a reload, after a reset. */
+  function syncTaskUi() {
+    var labels = { "new": "Design my presentation", improve: "Restructure my presentation", single: "Design my slide", find: "Open slide repository" };
+    var task = radio("task") || "new";
+    $("#go").textContent = labels[task] || labels["new"];
+    $("#lenField").hidden = task === "single";
+  }
+
   $("#briefForm").addEventListener("change", function (e) {
     var t = e.target;
-    if (t.name === "task") {
-      var labels = { "new": "Design my presentation", improve: "Restructure my presentation", single: "Design my slide", find: "Open slide repository" };
-      $("#go").textContent = labels[t.value];
-      $("#lenField").hidden = t.value === "single";
-      renderXform();
-    }
+    if (t.name === "task") { syncTaskUi(); renderXform(); }
     if (t.name === "tplsrc") updateTplVisibility();
     if (t.id !== "files" && t.id !== "tplFile") save();
   });
@@ -636,7 +686,7 @@
     e.target.value = "";
     for (var i = 0; i < list.length; i++) {
       var f = list[i];
-      var entry = { name: f.name, text: "", chars: 0, error: "", pending: true };
+      var entry = { name: f.name, text: "", chars: 0, error: "", pending: true, large: f.size > 2 * 1024 * 1024 };
       state.files.push(entry);
       renderFiles();
       try {
@@ -675,8 +725,9 @@
 
   function renderFiles() {
     $("#fileList").innerHTML = state.files.map(function (f, i) {
-      var status = f.pending ? "Reading…" : f.error ? '<span class="err">' + esc(f.error) + "</span>" :
-        (f.slides ? f.slides + " slides · " : "") + (f.chars.toLocaleString() + " characters" + (f.note ? " (trimmed)" : ""));
+      var status = f.pending ? (f.large ? "Large file: reading can take a while…" : "Reading…") + elapsed() :
+        f.error ? '<span class="err">' + esc(f.error) + "</span>" :
+        (f.slides ? f.slides + " slides · " : "") + (f.chars.toLocaleString() + " characters" + (f.note ? " (too long: only the first part is used)" : ""));
       return '<li><span title="' + esc(f.name) + '">' + esc(f.name) + "</span><span>" + status + ' <button type="button" data-rm="' + i + '" aria-label="Remove ' + esc(f.name) + '">✕</button></span></li>';
     }).join("");
   }
@@ -689,11 +740,11 @@
 
   $("#newDeck").addEventListener("click", function () {
     $("#briefForm").reset();
-    $("#topic").value = ""; $("#decision").value = ""; $("#notesIn").value = "";
+    $("#topic").value = ""; $("#decision").value = ""; $("#notesIn").value = ""; briefError("");
     state.files = []; state.versions = {}; state.briefKey = ""; state.review = null; state.qa = null; state.board = null; state.version = "full";
     state.deck = null; state.xformResult = null; state.templateFile = null;
     state.stages = ["todo", "todo", "todo", "todo", "todo", "todo"];
-    $("#lenField").hidden = false; $("#go").textContent = "Design my presentation";
+    syncTaskUi();
     $("#tplStatus").textContent = ""; updateTplVisibility();
     renderFiles(); renderPipeline(); renderDeck(); renderXform(); selectTab("story"); save();
     $("#topic").focus();
@@ -728,7 +779,7 @@
   /* ------------------------------------------------------------------ advisor */
   async function advise(text) {
     if (!text.trim()) { toast("Describe the message you want the slide to communicate.", true); return; }
-    var btn = $("#adviseBtn"); busy(btn, true, "Thinking…");
+    var btn = $("#adviseBtn"); if (!busy(btn, true, "Thinking…")) return;
     $("#rec").innerHTML = loading("Matching your message to the right slide…");
     $("#alts").innerHTML = "";
     try {
@@ -761,13 +812,38 @@
     try { repo = (await Api.get("/api/repository")).items; repoLoaded = true; renderRepo(); }
     catch (e) { $("#repoGrid").innerHTML = '<p class="empty">' + esc(e.message) + "</p>"; }
   }
+  /* Repository search: word-level, not substring. Stop words go, words are lightly stemmed
+     ("costs" = "cost", "rising" = "rise"), and each query word also matches a few business synonyms,
+     so a question like "why did costs rise" finds the margin bridge. Ranked by words matched. */
+  var STOP = " a an and are at be by did do does for from how in is it of on or our should the this to was we what when where which who why will with ";
+  var SYNONYMS = {
+    cost: ["margin", "spend", "expense", "price", "invest"], margin: ["cost", "profit"], rise: ["increase", "grow", "change", "up"],
+    fall: ["decline", "drop", "change", "down"], revenue: ["sale", "growth"], plan: ["roadmap", "timeline", "target", "track"],
+    risk: ["issue", "threat", "mitigation"], option: ["choice", "alternative", "strategy"], fund: ["invest", "approve", "budget"]
+  };
+  function stem(w) {
+    return w.replace(/ies$/, "y").replace(/(ing|ed|es|s)$/, "").replace(/(.)\1$/, "$1").replace(/e$/, "");
+  }
+  function words(text) {
+    return text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(function (w) { return w && STOP.indexOf(" " + w + " ") < 0; }).map(stem);
+  }
+  var SYN = {};  // SYNONYMS keyed and valued by stem, the form query words arrive in
+  Object.keys(SYNONYMS).forEach(function (k) { SYN[stem(k)] = SYNONYMS[k].map(stem); });
+  function repoScore(r, terms) {
+    var hay = words([r.title, r.question, r.category, LAYOUT[r.kind] || "", r.headline || "", (r.structure || []).join(" ")].join(" "));
+    return terms.reduce(function (n, t) {
+      var alts = [t].concat(SYN[t] || []);
+      return n + (hay.some(function (w) { return alts.some(function (a) { return w === a || (a.length > 3 && w.indexOf(a) === 0); }); }) ? 1 : 0);
+    }, 0);
+  }
   function renderRepo() {
     var cats = ["All"].concat(repo.map(function (r) { return r.category; }).filter(function (c, i, a) { return a.indexOf(c) === i; }));
-    var q = $("#repoSearch").value.toLowerCase().trim();
-    var list = repo.filter(function (r) {
-      return (repoCat === "All" || r.category === repoCat) &&
-        (!q || [r.title, r.question, r.category, LAYOUT[r.kind] || ""].join(" ").toLowerCase().indexOf(q) >= 0);
-    });
+    var terms = words($("#repoSearch").value);
+    var list = repo.filter(function (r) { return repoCat === "All" || r.category === repoCat; })
+      .map(function (r) { return { r: r, score: terms.length ? repoScore(r, terms) : 1 }; })
+      .filter(function (x) { return x.score > 0; })
+      .sort(function (a, b) { return terms.length ? b.score - a.score || (b.r.uses || 0) - (a.r.uses || 0) : 0; })
+      .map(function (x) { return x.r; });
     $("#repoFilters").innerHTML = cats.map(function (c) { return '<button type="button" aria-pressed="' + (c === repoCat) + '">' + esc(c) + "</button>"; }).join("");
     $("#repoGrid").innerHTML = list.length ? list.map(function (r) {
       return '<article class="panel repo-card">' + thumb(r.kind) +
@@ -790,7 +866,7 @@
     catch (e) { toast("Cannot reach the studio server: " + e.message, true); }
     var restored = restore();
     if (!restored) $("#topic").value = "";
-    $("#lenField").hidden = radio("task") === "single";
+    syncTaskUi();
     renderFiles();
     renderPipeline();
     renderDeck();

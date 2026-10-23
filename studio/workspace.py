@@ -20,6 +20,11 @@ class Workspace:
         self._lock = threading.Lock()
         self._last_sweep = 0.0
 
+    @staticmethod
+    def is_id(fid):
+        """True for something this store could have issued (whether or not the file still exists)."""
+        return bool(_ID.match(fid or ""))
+
     def _path(self, fid, suffix):
         if not _ID.match(fid or ""):
             raise KeyError(fid)

@@ -102,13 +102,11 @@ def _footer(c, idx, total, meta, slide=None):
     c.text(0.55, 7.02, 6, 0.35, meta["template_name"], size=9, color=c.colors["muted"])
     if idx:
         c.text(11.7, 7.02, 1.05, 0.35, "%d / %d" % (idx, total), size=9, color=c.colors["muted"], align="r")
-    ev = (slide or {}).get("evidence") or {}
     if slide is None:
         return
-    if ev.get("status") == "linked" and ev.get("source"):
-        c.text(0.55, 6.62, 12.2, 0.35, "Source: " + ev["source"], size=9, color=c.colors["muted"])
-    elif ev.get("status") != "linked":
-        c.text(0.55, 6.62, 12.2, 0.35, "Evidence needed: " + (ev.get("gap") or "add source"), size=9, color=c.colors["warn"])
+    text, warn = layouts.evidence_note(slide)
+    if text:
+        c.text(0.55, 6.62, 12.2, 0.35, text, size=9, color=c.colors["warn" if warn else "muted"])
 
 
 def _draw_slide(c, s, idx, total, meta):
@@ -207,7 +205,7 @@ def build(title, slides, meta, tpl):
         files["ppt/slides/_rels/slide%d.xml.rels" % i] = _rels([
             ("rId1", "slideLayout", "../slideLayouts/slideLayout1.xml"),
             ("rId2", "notesSlide", "../notesSlides/notesSlide%d.xml" % i)])
-        notes = s.get("notes") or ""
+        notes = layouts.notes_text(s)
         ev = s.get("evidence") or {}
         if ev.get("source"):
             notes += "\nSource: " + ev["source"]

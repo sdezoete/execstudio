@@ -1,4 +1,6 @@
 """Validation and normalisation of data coming from the browser or the LLM."""
+import datetime as _dt
+
 from .catalog import (AUDIENCE_BY_ID, BOARD_EXTERNAL_ONLY, BOARD_READINESS_DIMENSIONS, BOARD_RULES,
                        KINDS, LENGTHS, PRESENTATION_TYPES, STAGE_GATES)
 
@@ -123,15 +125,29 @@ def storyline(raw, fallback_title):
 BOARD_RESULTS = ("PASS", "FAIL", "WARNING", "NOT VERIFIABLE", "NOT APPLICABLE")
 
 
+def _iso_date(value, label):
+    s = _s(value, 10)
+    if not s:
+        return ""
+    try:
+        _dt.date.fromisoformat(s)
+    except ValueError:
+        raise BadRequest("The %s is not a valid date (use YYYY-MM-DD)." % label) from None
+    return s
+
+
 def board_context(raw):
     if not isinstance(raw, dict):
         raw = {}
+    sub, meet = _iso_date(raw.get("submission_date"), "submission date"), _iso_date(raw.get("meeting_date"), "meeting date")
+    if sub and meet and meet < sub:  # ISO dates compare correctly as strings
+        raise BadRequest("The meeting date (%s) is before the submission date (%s)." % (meet, sub))
     return {
         "presentation_type": raw.get("presentation_type") if raw.get("presentation_type") in PRESENTATION_TYPES else "",
         "stage_gate": raw.get("stage_gate") if raw.get("stage_gate") in STAGE_GATES else "",
         "ook_investment": raw.get("ook_investment") if raw.get("ook_investment") in ("yes", "no") else "",
-        "submission_date": _s(raw.get("submission_date"), 10),
-        "meeting_date": _s(raw.get("meeting_date"), 10),
+        "submission_date": sub,
+        "meeting_date": meet,
     }
 
 

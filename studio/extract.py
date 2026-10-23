@@ -51,7 +51,7 @@ def extract(name, data):
         return _pdf(data)
     if ext in ("doc", "ppt", "xls"):
         raise ExtractError("Older Office formats aren't supported. Save the file as .%sx and upload it again." % ext)
-    raise ExtractError("Unsupported file type. Use .docx, .pptx, .xlsx, .csv, .txt or .md.")
+    raise ExtractError("Unsupported file type. Use .docx, .pptx, .xlsx, .csv, .txt, .md%s." % (" or .pdf" if PDF_SUPPORTED else ""))
 
 
 def _pdf(data):

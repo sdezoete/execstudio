@@ -12,6 +12,20 @@ import re
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+# How the mock "simplifies" a slide body: "merge" folds it into three lines and keeps every word
+# (a good model); "drop" keeps the first line only (the content loss seen in the 23 Oct test).
+TRANSFORM_MODE = "merge"
+TRANSFORM_CALLS = []   # slide indices of every transform request, so tests can see retries
+SHARPEN_REPLIES = []   # headlines to return first, before the default good one
+
+
+def _simplify(body):
+    if TRANSFORM_MODE == "drop":
+        return body[:1]
+    k = min(3, len(body))
+    size = -(-len(body) // k) if k else 0
+    return ["; ".join(body[i:i + size]) for i in range(0, len(body), size)] if k else []
+
 
 def _parse_brief_block(user_content):
     """Pull the {"topic": ..., "decision_required": ..., ...} object out of the
@@ -35,6 +49,11 @@ def _dynamic_storyline(brief):
     facts = (brief.get("key_facts") or "").strip()
     audience = (brief.get("audience") or "Senior leadership").strip()
     fact_bullets = [f.strip() for f in re.split(r"[.\n]", facts) if f.strip()][:4]
+    if not facts:
+        # what a real model did with no facts in the 23 Oct test (D-09): one slide, chatter in the notes
+        return {"title": topic, "slides": [{"kind": "summary", "headline": "Facts are needed to build " + topic,
+                "body": ["Share the key figures"], "notes": "I cannot build this storyline without data. Please share the facts.",
+                "evidence": {"status": "linked", "source": "SOURCE DOCUMENTS"}}]}
 
     slides = [{"kind": "title", "headline": topic, "body": [audience], "visual": "Cover", "notes": "Welcome.",
                "evidence": {"status": "linked", "source": "Brief", "gap": ""}}]
@@ -120,12 +139,18 @@ class H(BaseHTTPRequestHandler):
         elif "recommend the single best slide" in system:
             out = ADVISE
         elif "Rewrite the slide headline" in system:
-            out = {"headline": "Margin fell 1.8 pts, driven by input costs"}
+            out = {"headline": SHARPEN_REPLIES.pop(0) if SHARPEN_REPLIES else "Margin fell 1.8 pts, driven by input costs"}
         elif "improving existing slides" in system:
-            slides = json.loads(req["messages"][1]["content"].split("SLIDES\n", 1)[1])
+            slides = json.loads(req["messages"][1]["content"].split("SLIDES\n", 1)[1].split("\n\nYOUR PREVIOUS", 1)[0])
+            TRANSFORM_CALLS.append([x["index"] for x in slides])
             out = {"slides": [{"index": x["index"], "title": (x["title"] + ": the key finding")[:120],
-                               "body": x["body"][:3] if "Simplify" in system else None,
+                               "body": _simplify(x["body"]) if "Simplify" in system else None,
                                "change": "Headline rewritten"} for x in slides]}
+        elif "Compliance Reviewer" in system:
+            # an over-generous reviewer: passes everything and quotes the brief (test report D-02)
+            out = {"compliance": [{"id": "PRES-08", "result": "PASS", "evidence": "Closing confirms the decision.", "action": ""}],
+                   "board_readiness": {"decision_clarity": {"score": 5, "comment": "Clear ask."}},
+                   "summary": "Ready."}
         elif "pre-read" in system:
             out = {"brief": "## Context\nTest brief."}
         else:

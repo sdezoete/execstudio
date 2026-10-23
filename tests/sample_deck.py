@@ -57,6 +57,39 @@ def build():
     return buf.getvalue()
 
 
+def build_report_deck():
+    """The shapes behind the 23 Oct content-loss defect (D-01): five bullets with figures, three KPI
+    tiles in separate text boxes, and a short "Next steps" slide whose longest text is a footer."""
+    prs = Presentation()
+    s1 = prs.slides.add_slide(prs.slide_layouts[0])
+    s1.shapes.title.text = "Logistics update"
+    s1.placeholders[1].text = "Supply chain team"
+
+    s2 = prs.slides.add_slide(prs.slide_layouts[1])
+    s2.shapes.title.text = "Overview of freight costs"
+    body = s2.placeholders[1].text_frame
+    body.text = "Freight cost per tonne rose 12% to SAR 410"
+    for t in ["Diesel surcharge added 0.9 pts", "Port fees in Jeddah up 6%", "Two carriers exited in July",
+              "Contract with Bahri renews in Q1"]:
+        body.add_paragraph().text = t
+
+    s3 = prs.slides.add_slide(prs.slide_layouts[5])
+    s3.shapes.title.text = "Key metrics"
+    for k, (num, label) in enumerate([("94%", "On-time delivery"), ("3.2 days", "Average lead time"),
+                                      ("SAR 1.4m", "Monthly freight spend")]):
+        tf = s3.shapes.add_textbox(Inches(0.6 + k * 3.1), Inches(2.2), Inches(2.8), Inches(1.6)).text_frame
+        tf.text = num
+        tf.add_paragraph().text = label
+
+    s4 = prs.slides.add_slide(prs.slide_layouts[1])
+    s4.shapes.title.text = "Next steps"
+    s4.placeholders[1].text = "Tender by 30 Nov"
+    s4.shapes.add_textbox(Inches(0.5), Inches(6.65), Inches(9), Inches(0.35)).text_frame.text = "Evidence needed: Evidence needed"
+    buf = io.BytesIO()
+    prs.save(buf)
+    return buf.getvalue()
+
+
 if __name__ == "__main__":
     with open(sys.argv[1] if len(sys.argv) > 1 else "sample.pptx", "wb") as fh:
         fh.write(build())

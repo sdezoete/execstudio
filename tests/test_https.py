@@ -40,8 +40,11 @@ class HTTPS(unittest.TestCase):
         cls.tmp = Path(tempfile.mkdtemp(prefix="studio-test-"))
         cls.cert, cls.key = cls.tmp / "cert.pem", cls.tmp / "key.pem"
         tls.make_test_certificate(cls.cert, cls.key, hosts=("localhost", "127.0.0.1"))
+        # llm_base_url: a closed local port, so /api/health answers at once instead of depending
+        # on whatever real AI endpoint .env points at
         cls.cfg = dict(config.load(), host="127.0.0.1", tls_enabled=True, tls_allow_self_signed=True,
-                       tls_cert_file=str(cls.cert), tls_key_file=str(cls.key), tls_pfx_file="")
+                       tls_cert_file=str(cls.cert), tls_key_file=str(cls.key), tls_pfx_file="",
+                       llm_base_url="http://127.0.0.1:9/v1")
         cls.server, scheme, cls.info = srv.build_server(cls.cfg, port=0)
         assert scheme == "https"
         cls.port = cls.server.server_address[1]

@@ -15,10 +15,34 @@ Canvas API (all measurements in inches):
 """
 import re
 
+from ..checks import is_placeholder
+
 
 def items(slide, n, default="[Add content]"):
+    """The first n body points. Points that do not fit the layout are recorded on the slide as
+    "overflow"; the engines put them in the speaker notes, so nothing is silently lost."""
     body = list(slide.get("body") or [])
+    if len(body) > n:
+        slide["overflow"] = body[n:]
     return body[:n] if body else [default]
+
+
+def notes_text(slide):
+    """Speaker notes plus any points moved off the slide by items()."""
+    notes = (slide.get("notes") or "").strip()
+    if slide.get("overflow"):
+        notes = (notes + "\n\nMoved from the slide:\n" + "\n".join("- " + x for x in slide["overflow"])).strip()
+    return notes
+
+
+def evidence_note(slide):
+    """The footer line for a slide's evidence: ("Source: …", False), ("Evidence gap: …", True) for a gap
+    that actually says something, or ("", False). A bare "Evidence needed" default is not repeated."""
+    ev =slide.get("evidence") or {}
+    if ev.get("status") == "linked":
+        return ("Source: " + ev["source"], False) if ev.get("source") else ("", False)
+    gap = (ev.get("gap") or "").strip()
+    return ("Evidence gap: " + gap, True) if gap and not is_placeholder(gap) else ("", False)
 
 
 def valid_chart(spec):

@@ -346,11 +346,9 @@ def footer(prs, c, idx, total, meta, slide=None):
         c.text(sw - 1.55, sh - 0.48, 1.05, 0.35, "%d / %d" % (idx, total), size=9, color=c.colors["muted"], align="r")
     if slide is None:
         return
-    ev = slide.get("evidence") or {}
-    if ev.get("status") == "linked" and ev.get("source"):
-        c.text(0.5, sh - 0.85, sw - 1.0, 0.35, "Source: " + ev["source"], size=9, color=c.colors["muted"])
-    elif ev.get("status") != "linked":
-        c.text(0.5, sh - 0.85, sw - 1.0, 0.35, "Evidence needed: " + (ev.get("gap") or "add source"), size=9, color=c.colors["warn"])
+    text, warn = layouts.evidence_note(slide)
+    if text:
+        c.text(0.5, sh - 0.85, sw - 1.0, 0.35, text, size=9, color=c.colors["warn" if warn else "muted"])
 
 
 def add_headline_slide(prs, layout, headline, tpl):
@@ -408,7 +406,7 @@ def build(title, slides, meta, tpl, template_path=None, template_bytes=None, tem
             c = PptxCanvas(slide, tpl)
             layouts.draw(c, s, content_area(prs, slide))
             footer(prs, c, i, total, meta, s)
-        write_notes(slide, s.get("notes"), (s.get("evidence") or {}).get("source", ""))
+        write_notes(slide, layouts.notes_text(s), (s.get("evidence") or {}).get("source", ""))
     cp = prs.core_properties
     cp.title = title[:250]
     cp.author = meta.get("author", "Executive Presentation Studio")

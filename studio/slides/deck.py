@@ -20,6 +20,7 @@ from . import pptx_engine as eng
 from .pptx_engine import inches
 
 TITLE_TYPES = eng.TITLE_TYPES
+CHROME_TYPES = (PP_PLACEHOLDER.FOOTER, PP_PLACEHOLDER.SLIDE_NUMBER, PP_PLACEHOLDER.DATE)
 
 
 class DeckError(Exception):
@@ -47,23 +48,45 @@ def _text_of(shp):
     return []
 
 
+def _has_text(shp):
+    return getattr(shp, "has_text_frame", False) and shp.has_text_frame and bool(shp.text_frame.text.strip())
+
+
+def _slide_height(slide):
+    try:
+        return slide.part.package.presentation_part.presentation.slide_height
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def is_chrome(shp, slide_h):
+    """Footer, date and slide-number placeholders, and short text along the bottom edge (a source line,
+    a confidentiality mark, or this studio's own evidence note). Never a slide's title or main text."""
+    if shp.is_placeholder and shp.placeholder_format.type in CHROME_TYPES:
+        return True
+    return bool(slide_h) and shp.top is not None and shp.top >= 0.85 * slide_h and len(shp.text_frame.text.strip()) <= 160
+
+
 def find_title(slide):
     for shp in slide.shapes:
         if shp.is_placeholder and shp.placeholder_format.type in TITLE_TYPES and shp.has_text_frame:
             return shp
     # no title placeholder: the highest short text box in the top quarter of the slide
-    cands = [s for s in slide.shapes if getattr(s, "has_text_frame", False) and s.has_text_frame
-             and 0 < len(s.text_frame.text.strip()) <= 160 and s.top is not None]
+    slide_h = _slide_height(slide)
+    cands = [s for s in slide.shapes if _has_text(s) and len(s.text_frame.text.strip()) <= 160
+             and s.top is not None and not is_chrome(s, slide_h)]
     cands.sort(key=lambda s: s.top)
     return cands[0] if cands else None
 
 
 def find_body(slide, title):
-    """The main text container: the non-title shape with the most text, preferring body placeholders."""
+    """The main text container: the non-title shape with the most text, preferring body placeholders.
+    Footers and bottom-edge small print are never chosen, however long they are."""
     best, best_score = None, 0
     title_id = title.shape_id if title is not None else None
+    slide_h = _slide_height(slide)
     for shp in slide.shapes:
-        if shp.shape_id == title_id or not getattr(shp, "has_text_frame", False) or not shp.has_text_frame:
+        if shp.shape_id == title_id or not _has_text(shp) or is_chrome(shp, slide_h):
             continue
         n = len(shp.text_frame.text.strip())
         if n < 3:
@@ -72,6 +95,24 @@ def find_body(slide, title):
         if score > best_score:
             best, best_score = shp, score
     return best
+
+
+def other_text(slide, title, body):
+    """Text in every other box, in reading order: (content, small_print). content is one line per box
+    (KPI tiles, callouts, labels); small_print is the bottom-edge text that is_chrome() skips, minus
+    slide numbers and dates."""
+    skip = {s.shape_id for s in (title, body) if s is not None}
+    slide_h = _slide_height(slide)
+    content, small = [], []
+    for shp in sorted(slide.shapes, key=lambda s: (s.top or 0, s.left or 0)):
+        if shp.shape_id in skip or not _has_text(shp):
+            continue
+        line = " – ".join(_text_of(shp))
+        if not is_chrome(shp, slide_h):
+            content.append(line)
+        elif not (shp.is_placeholder and shp.placeholder_format.type in (PP_PLACEHOLDER.SLIDE_NUMBER, PP_PLACEHOLDER.DATE)):
+            small.append(line)
+    return content, small
 
 
 def _visuals(slide):
@@ -165,7 +206,8 @@ def slide_texts(data, indices):
         title = find_title(slide)
         body = find_body(slide, title)
         out.append({"index": i, "title": title.text_frame.text.strip() if title else "",
-                    "body": _text_of(body) if body else []})
+                    "body": _text_of(body) if body else [],
+                    "other_text": other_text(slide, title, body)[0]})
     return out
 
 
@@ -281,9 +323,14 @@ def retemplate(data, indices, changes, tpl, meta, template_path, template_bytes=
         title = find_title(s)
         body = find_body(s, title)
         head = (ch.get("title") or (title.text_frame.text.strip() if title else "") or "Slide %d" % i).strip()
-        lines = ch.get("body") if ch.get("body") else (_text_of(body) if body else [])
+        lines = list(ch.get("body") if ch.get("body") else (_text_of(body) if body else []))
         pics, charts, tables, other = _visuals(s)
         carried, warnings = [], []
+        # KPI tiles, callouts and labels live in their own boxes: carry their text, never drop it
+        extra_text, small_print = other_text(s, title, body)
+        if extra_text:
+            lines += extra_text
+            carried.append("%d more text box%s added to the main text" % (len(extra_text), "" if len(extra_text) == 1 else "es"))
 
         if _is_cover(s) and not (charts or tables or pics):
             slide = _cover(prs, tpl, head, lines, meta, n, total)
@@ -344,6 +391,8 @@ def retemplate(data, indices, changes, tpl, meta, template_path, template_bytes=
         extra = lines[(8 if visuals else 10):]
         if extra:
             notes = (notes + "\n\nMoved from the slide:\n" + "\n".join("- " + x for x in extra)).strip()
+        if small_print:
+            notes = (notes + "\n\nSmall print on the original slide:\n" + "\n".join("- " + x for x in small_print)).strip()
         eng.write_notes(slide, notes)
         changes_done = ["Moved onto %s" % meta["template_name"]]
         if ch.get("title") and title is not None and ch["title"].strip() != title.text_frame.text.strip():

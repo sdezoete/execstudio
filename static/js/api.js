@@ -55,7 +55,8 @@
     }));
   }
 
-  /* POSTs JSON (or GETs when body is null) and saves the file the server returns. */
+  /* POSTs JSON (or GETs when body is null) and saves the file the server returns.
+     Resolves to { name, notice }: notice is the server's X-Studio-Notice header, or "". */
   async function download(path, body, fallbackName) {
     var res = body === null ? await fetch(path) : await fetch(path, {
       method: "POST",
@@ -80,7 +81,7 @@
     a.click();
     a.remove();
     setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
-    return name;
+    return { name: name, notice: res.headers.get("X-Studio-Notice") || "" };
   }
 
   window.Api = { get: get, post: post, upload: upload, uploadDeck: uploadDeck, uploadTemplate: uploadTemplate, download: download };

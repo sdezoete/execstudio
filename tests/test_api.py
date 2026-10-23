@@ -110,11 +110,44 @@ class WithLLM(Base):
         st, _, body = self.post("/api/qa", {"brief": BRIEF, "slides": s["slides"]})
         self.assertEqual(json.loads(body)["source"], "llm")
 
+    def test_no_facts_gives_skeleton_not_refusal(self):  # D-09
+        brief = dict(BRIEF, facts="", decision="", source="scratch")
+        s = json.loads(self.post("/api/storyline", {"brief": brief, "version": "full"})[2])
+        self.assertGreaterEqual(len(s["slides"]), 5)                      # a real skeleton, not one "send facts" slide
+        for sl in s["slides"]:
+            self.assertNotIn("I cannot", sl["notes"])
+            self.assertNotRegex(sl["evidence"].get("source", ""), "(?i)source documents")
+        from studio.checks import clean_storyline
+        out = clean_storyline([{"notes": "Please share the data.", "evidence": {"status": "linked", "source": "SOURCE DOCUMENTS"}}], False)
+        self.assertEqual((out[0]["notes"], out[0]["evidence"]["status"]), ("", "needed"))
+
+    def test_review_flags_phantom_gap(self):  # D-06
+        slide = {"kind": "driver", "headline": "Margin fell 2.1 pts on freight and raw materials",
+                 "body": ["Freight +0.9 pts", "Raw materials +1.2 pts", "Remaining gap not specified"],
+                 "evidence": {"status": "linked", "source": "Finance"}}
+        r = json.loads(self.post("/api/review", {"brief": BRIEF, "slides": [slide]})[2])
+        check = next(c for c in r["checks"] if c["title"] == "Figures add up")
+        self.assertFalse(check["ok"])
+        self.assertIn("0.9 + 1.2 = 2.1 pts", check["detail"])
+        slide["body"] = slide["body"][:2]
+        r = json.loads(self.post("/api/review", {"brief": BRIEF, "slides": [slide]})[2])
+        self.assertTrue(next(c for c in r["checks"] if c["title"] == "Figures add up")["ok"])
+
     def test_advise_and_sharpen(self):
         a = json.loads(self.post("/api/advise", {"message": "why did turnover increase"})[2])
         self.assertEqual(a["primary"]["kind"], "driver")
         h = json.loads(self.post("/api/sharpen", {"headline": "Margin overview", "body": []})[2])
         self.assertIn("1.8", h["headline"])
+
+    def test_sharpen_holds_the_15_word_rule(self):  # D-04
+        long_one = "Key performance indicators show that our margin has declined because input costs went up sharply this year"
+        mock_llm.SHARPEN_REPLIES[:] = [long_one]                    # first answer too long, retry is fine
+        h = json.loads(self.post("/api/sharpen", {"headline": "KPIs", "body": []})[2])
+        self.assertEqual((h["source"], h["headline"]), ("llm", "Margin fell 1.8 pts, driven by input costs"))
+        mock_llm.SHARPEN_REPLIES[:] = [long_one, long_one]          # never fixed: built-in rules, never the long one
+        h = json.loads(self.post("/api/sharpen", {"headline": "KPIs", "body": []})[2])
+        self.assertEqual(h["source"], "rules")
+        self.assertLessEqual(len(h["headline"].split()), 15)
 
     def test_export_pptx_valid(self):
         s = json.loads(self.post("/api/storyline", {"brief": BRIEF, "version": "full"})[2])
@@ -129,6 +162,19 @@ class WithLLM(Base):
         for n in names:
             if n.endswith(".xml") or n.endswith(".rels"):
                 ET.fromstring(zf.read(n))  # every part is well-formed
+
+    def test_export_keeps_overflow_and_no_placeholder_footer(self):  # D-14
+        from pptx import Presentation
+        bullets = ["Point %d costs SAR %d" % (k, k * 10) for k in range(1, 8)]
+        slides = [{"kind": "summary", "headline": "Seven points that matter", "body": bullets, "evidence": {"status": "needed"}}]
+        st, h, body = self.post("/api/export/pptx", {"brief": BRIEF, "title": "T", "slides": slides})
+        self.assertEqual(st, 200, body)
+        self.assertIn("moved to the speaker notes", h["X-Studio-Notice"])
+        s = Presentation(io.BytesIO(body)).slides[0]
+        everything = " ".join(sh.text_frame.text for sh in s.shapes if sh.has_text_frame) + s.notes_slide.notes_text_frame.text
+        for b in bullets:
+            self.assertIn(b, everything)                                  # nothing lost
+        self.assertNotIn("Evidence needed", everything)                   # no "Evidence needed: Evidence needed"
 
     def test_briefing(self):
         s = json.loads(self.post("/api/storyline", {"brief": BRIEF})[2])
@@ -232,10 +278,87 @@ class Decks(Base):
         self.assertTrue(any(getattr(sh, "has_chart", False) and sh.has_chart for sh in prs.slides[0].shapes))
         self.assertIn("Finance", prs.slides[0].notes_slide.notes_text_frame.text)
 
+    def test_download_messages(self):  # D-12
+        for fid, expect in (("nonsense", "File not found"), ("0" * 32, "no longer on the server")):
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                self.get("/api/download/" + fid)
+            self.assertIn(expect, json.loads(cm.exception.read())["error"])
+        st, _, body = self.post("/api/extract", raw=b"MZ\x90\x00", headers={"X-Filename": "tool.exe"})
+        self.assertIn(".pdf", json.loads(body)["error"])                  # PDF is supported here, so it is listed
+
     def test_expired_deck(self):
         st, _, body = self.post("/api/deck/transform", {"deck_id": "0" * 32, "selected": [1], "actions": {"headlines": True}, "brief": BRIEF})
         self.assertEqual(st, 400)
         self.assertIn("Upload it again", json.loads(body)["error"])
+
+    # ---- D-02: board assessment judges the slides, not the brief
+    def test_board_pres08_fails_without_decision_slide(self):
+        slides = [{"kind": "summary", "headline": "Margin fell 1.8 pts on input costs", "body": ["Freight +0.9 pts"]},
+                  {"kind": "roadmap", "headline": "Repricing lands in Q1", "body": ["Pilot in November"]}]
+        st, _, body = self.post("/api/board-assessment", {"brief": BRIEF, "slides": slides, "context": {}})
+        self.assertEqual(st, 200, body)
+        r = json.loads(body)
+        self.assertEqual(r["source"], "llm")
+        pres08 = next(c for c in r["compliance"] if c["id"] == "PRES-08")
+        self.assertEqual(pres08["result"], "FAIL")
+        clarity = next(d for d in r["board_readiness"] if d["id"] == "decision_clarity")
+        self.assertLessEqual(clarity["score"], 2)
+        slides.append({"kind": "decision", "headline": "Approve a 3% price increase", "body": ["Approve today"]})
+        r = json.loads(self.post("/api/board-assessment", {"brief": BRIEF, "slides": slides, "context": {}})[2])
+        self.assertEqual(next(c for c in r["compliance"] if c["id"] == "PRES-08")["result"], "PASS")
+
+    def test_board_rejects_meeting_before_submission(self):  # D-07
+        slides = [{"kind": "decision", "headline": "Approve a 3% price increase", "body": ["Approve today"]}]
+        st, _, body = self.post("/api/board-assessment", {"brief": BRIEF, "slides": slides,
+                                "context": {"submission_date": "2026-11-10", "meeting_date": "2026-11-02"}})
+        self.assertEqual(st, 400)
+        self.assertIn("before the submission date", json.loads(body)["error"])
+        st, _, body = self.post("/api/board-assessment", {"brief": BRIEF, "slides": slides,
+                                "context": {"submission_date": "2026-11-10", "meeting_date": "next week"}})
+        self.assertEqual(st, 400)
+        r = json.loads(self.post("/api/board-assessment", {"brief": BRIEF, "slides": slides,
+                                 "context": {"submission_date": "2026-11-10", "meeting_date": "2026-11-10"}})[2])
+        self.assertEqual(r["compliance"][0]["result"], "FAIL")                 # same day: 0 business days
+
+    # ---- D-01: transform must never lose content
+    def _upload_report_deck(self):
+        st, _, body = self.post("/api/deck/upload", raw=sample_deck.build_report_deck(), headers={"X-Filename": "logistics.pptx"})
+        self.assertEqual(st, 200, body)
+        return json.loads(body)
+
+    def test_transform_rejects_lossy_rewrite(self):
+        d = self._upload_report_deck()
+        mock_llm.TRANSFORM_MODE, mock_llm.TRANSFORM_CALLS[:] = "drop", []
+        try:
+            st, _, body = self.post("/api/deck/transform", {"deck_id": d["deck_id"], "selected": [2],
+                                    "actions": {"simplify": True}, "brief": BRIEF})
+        finally:
+            mock_llm.TRANSFORM_MODE = "merge"
+        self.assertEqual(st, 200, body)
+        r = json.loads(body)
+        self.assertEqual(len(mock_llm.TRANSFORM_CALLS), 2)              # asked once, re-asked once
+        self.assertTrue(any("Left unchanged" in w and "SAR" not in w for w in r["report"][0]["warnings"]), r["report"])
+        self.assertNotIn("Main text simplified", " ".join(r["report"][0]["changes"]))
+        text = [p.text for p in self._open(r["file_id"]).slides[1].placeholders[1].text_frame.paragraphs]
+        self.assertEqual(len(text), 5)                                  # all five bullets still there
+        self.assertIn("Contract with Bahri renews in Q1", text)
+
+    def test_transform_keeps_text_boxes_and_ignores_footer(self):
+        d = self._upload_report_deck()
+        self.assertEqual(d["slides"][3]["body"], ["Tender by 30 Nov"])   # the footer is not the body
+        st, _, body = self.post("/api/deck/transform", {"deck_id": d["deck_id"], "selected": [2, 3, 4],
+                                "actions": {"headlines": True, "simplify": True, "retemplate": True}, "brief": BRIEF})
+        self.assertEqual(st, 200, body)
+        r = json.loads(body)
+        prs = self._open(r["file_id"])
+        text = lambda s: " ".join(sh.text_frame.text for sh in s.shapes if sh.has_text_frame)  # noqa: E731
+        for fact in ("94%", "3.2 days", "SAR 1.4m", "Average lead time"):
+            self.assertIn(fact, text(prs.slides[1]))                   # every KPI tile carried over
+        self.assertIn("SAR 410", text(prs.slides[0]))
+        self.assertIn("Contract with Bahri", text(prs.slides[0]))
+        self.assertIn("Tender by 30 Nov", text(prs.slides[2]))
+        self.assertNotIn("Evidence needed: Evidence needed", text(prs.slides[2]))
+        self.assertIn("Evidence needed", prs.slides[2].notes_slide.notes_text_frame.text)  # small print kept in notes
 
 
 class WithoutLLM(Base):

@@ -13,6 +13,7 @@ from pathlib import Path
 
 from . import catalog, fallback, prompts, review, schema
 from . import slides as slide_engine
+from .checks import clean_storyline, headline_problem, rewrite_problem
 from .config import ROOT
 from .extract import PDF_SUPPORTED, ExtractError, extract
 from .llm import LLMClient, LLMError
@@ -64,7 +65,8 @@ class Studio:
         except (LLMError, ValueError, KeyError, TypeError) as e:
             log.warning("%s: falling back to built-in rules (%s)", action, e)
             result = rules()
-            meta = {"source": "rules", "warning": "The AI service was unavailable (%s). Built-in rules were used instead." % str(e).rstrip(".")}
+            meta = {"source": "rules", "warning": "The AI service was unavailable or its answer could not be used (%s). "
+                                                  "Built-in rules were used instead." % str(e).rstrip(".")}
         self.audit(action, brief, source=meta["source"], ms=int((time.time() - t0) * 1000))
         return result, meta
 
@@ -105,7 +107,11 @@ class Studio:
         def call():
             system, user = prompts.storyline(b, version, ctx)
             data = schema.storyline(self.llm.chat_json(system, user), b["topic"])
-            data["slides"] = data["slides"][:max(hi, 1)]
+            data["slides"] = clean_storyline(data["slides"][:max(hi, 1)], bool(ctx))
+            if len(data["slides"]) < lo:
+                # e.g. one "please send me facts" slide when no facts were given (test report D-09)
+                raise ValueError("the AI returned %d slide%s, fewer than the %d asked for"
+                                 % (len(data["slides"]), "" if len(data["slides"]) == 1 else "s", lo))
             return data
 
         result, meta = self._ai("storyline", call, lambda: fallback.storyline(b, version), b)
@@ -152,6 +158,7 @@ class Studio:
             return schema.board_result(self.llm.chat_json(system, user, max_tokens=6000))
 
         result, meta = self._ai("board_assessment", call, lambda: fallback.board_assessment(b, slides, ctx), b)
+        _enforce_decision_slide(result, slides)
         result["compliance"].insert(0, _sub01(ctx))
         result.update(meta)
         return result
@@ -189,11 +196,16 @@ class Studio:
         b = payload.get("brief") if isinstance(payload.get("brief"), dict) else {}
 
         def call():
-            system, user = prompts.sharpen(headline, body, b)
-            h = str(self.llm.chat_json(system, user, max_tokens=300)["headline"]).strip()
-            if not h:
-                raise ValueError("empty headline")
-            return {"headline": h[:300]}
+            # held to Quality check's own rules: one retry with the reason, then the built-in rules
+            rejected = None
+            for _attempt in range(2):
+                system, user = prompts.sharpen(headline, body, b, rejected)
+                h = str(self.llm.chat_json(system, user, max_tokens=300)["headline"]).strip()
+                problem = headline_problem(h)
+                if not problem:
+                    return {"headline": h[:300]}
+                rejected = (h, problem)
+            raise ValueError("sharpened headline still fails: " + rejected[1])
 
         result, meta = self._ai("sharpen", call, lambda: {"headline": fallback.sharpen(headline)})
         result.update(meta)
@@ -266,7 +278,13 @@ class Studio:
         template_bytes, template_is_potx = upload if upload else (None, False)
         data = slide_engine.build(title, slides, meta, tpl, template_bytes, template_is_potx)
         self.audit("export_pptx", b, slides=len(slides), engine=slide_engine.ENGINE)
-        return _filename(title, "pptx"), data
+        moved = [(i, len(s["overflow"])) for i, s in enumerate(slides, 1) if s.get("overflow")]
+        notice = ""
+        if moved:
+            notice = "%d point%s did not fit the layout on slide%s %s and moved to the speaker notes." % (
+                sum(n for _, n in moved), "" if sum(n for _, n in moved) == 1 else "s",
+                "" if len(moved) == 1 else "s", ", ".join(str(i) for i, _ in moved))
+        return _filename(title, "pptx"), data, notice
 
     # ------------------------------------------------------------ existing decks
     def deck_upload(self, name, data):
@@ -328,6 +346,7 @@ class Studio:
         for r in report:
             r["before"] = before.get(r["index"], "")
             r["after"] = (changes.get(r["index"]) or {}).get("title") or r["before"]
+            r["warnings"] = (changes.get(r["index"]) or {}).get("warnings", []) + r["warnings"]
         fid = self.work.put(out, out_name)
         self.audit("deck_transform", b, slides=len(selected), source=meta_ai.get("source"), **actions)
         return dict(meta_ai, file_id=fid, filename=out_name, report=report,
@@ -335,26 +354,55 @@ class Studio:
                     "All slides are kept; only the selected slides were changed.")
 
     def _rewrite_slides(self, texts, actions, b):
-        """Ask the LLM for new titles/body text, in batches. Returns ({index: {title, body}}, meta)."""
+        """Ask the LLM for new titles/body text, in batches. Returns ({index: {title, body, warnings}}, meta).
+        Every rewrite must keep the original's numbers and names and contain no placeholder text; a slide
+        that fails is re-asked once with the exact problem, then left as it was (with a warning)."""
+        by_index = {t["index"]: t for t in texts}
+
+        def parse(data, valid):
+            got = {}
+            for item in data.get("slides") or []:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    idx = int(item.get("index"))
+                except (TypeError, ValueError):
+                    continue
+                if idx not in valid:
+                    continue
+                body = item.get("body") if actions["simplify"] and isinstance(item.get("body"), list) else None
+                got[idx] = {"title": str(item.get("title") or "").strip()[:300] if actions["headlines"] else "",
+                            "body": [str(x).strip()[:400] for x in body if str(x).strip()] if body else None}
+            return got
+
         def call():
             out = {}
             for start in range(0, len(texts), 8):
                 batch = texts[start:start + 8]
-                system, user = prompts.transform(batch, actions, b)
-                data = self.llm.chat_json(system, user)
                 valid = {t["index"] for t in batch}
-                for item in data.get("slides") or []:
-                    if not isinstance(item, dict):
-                        continue
+                system, user = prompts.transform(batch, actions, b)
+                got = parse(self.llm.chat_json(system, user), valid)
+                problems = {i: rewrite_problem(by_index[i], got[i]) for i in got}
+                problems = {i: p for i, p in problems.items() if p}
+                problems.update({i: "you returned nothing for this slide" for i in valid - set(got)})
+                if problems:
+                    retry = [by_index[i] for i in sorted(problems)]
+                    system, user = prompts.transform(retry, actions, b, feedback=problems)
                     try:
-                        idx = int(item.get("index"))
-                    except (TypeError, ValueError):
-                        continue
-                    if idx not in valid:
-                        continue
-                    body = item.get("body") if actions["simplify"] and isinstance(item.get("body"), list) else None
-                    out[idx] = {"title": str(item.get("title") or "")[:300] if actions["headlines"] else "",
-                                "body": [str(x)[:300] for x in body if str(x).strip()][:6] if body else None}
+                        again = parse(self.llm.chat_json(system, user), set(problems))
+                    except Exception:  # noqa: BLE001  (a failed retry must not discard the good slides)
+                        log.exception("deck_rewrite retry failed")
+                        again = {}
+                    for i in list(problems):
+                        if i in again and not rewrite_problem(by_index[i], again[i]):
+                            got[i] = again[i]
+                            del problems[i]
+                for i in valid:
+                    if i in problems:
+                        out[i] = {"title": "", "body": None,
+                                  "warnings": ["Left unchanged: the rewrite %s" % problems[i]]}
+                    else:
+                        out[i] = got[i]
             if not out:
                 raise ValueError("no slides returned")
             return out
@@ -363,7 +411,9 @@ class Studio:
             out = {}
             for t in texts:
                 out[t["index"]] = {"title": fallback.sharpen(t["title"]) if actions["headlines"] and t["title"] else "",
-                                   "body": t["body"][:5] if actions["simplify"] and len(t["body"]) > 5 else None}
+                                   "body": None,
+                                   "warnings": ["Main text kept as it is: simplifying needs the AI service"]
+                                   if actions["simplify"] and len(t["body"]) > 5 else []}
             return out
 
         return self._ai("deck_rewrite", call, rules, b)
@@ -372,7 +422,10 @@ class Studio:
         try:
             data, name = self.work.get(fid)
         except KeyError as e:
-            raise schema.BadRequest("That file has expired. Run the transformation again.") from e
+            if not self.work.is_id(fid):
+                raise schema.BadRequest("File not found. Check the download link.") from e
+            raise schema.BadRequest("That file is no longer on the server (files are kept for %g hours). Run the transformation again."
+                                    % self.cfg.get("work_retention_hours", 24)) from e
         return name, data
 
     def export_briefing(self, payload):
@@ -424,14 +477,29 @@ def _business_days_before(submission, meeting):
         s, m = _dt.date.fromisoformat(submission), _dt.date.fromisoformat(meeting)
     except (ValueError, TypeError):
         return None
-    if m <= s:
-        return None
+    if m < s:
+        return None  # schema.board_context rejects this before it gets here
     days, d = 0, s
     while d < m:
         d += _dt.timedelta(days=1)
         if d.weekday() not in _WEEKEND:
             days += 1
     return days
+
+
+def _enforce_decision_slide(result, slides):
+    """PRES-08 is judged on what the board will see. The model also reads the brief, and has passed
+    PRES-08 by quoting a decision that is on no slide (test report D-02), so a deck without a decision
+    slide always fails it, and its Decision clarity score is capped to match Quality check."""
+    if any(s.get("kind") == "decision" for s in slides):
+        return
+    for c in result["compliance"]:
+        if c["id"] == "PRES-08" and c["result"] != "FAIL":
+            c.update(result="FAIL", evidence="No slide states the action sought from GEC/GIC; the decision appears only in the brief.",
+                     action="Add a closing decision slide that restates the ask.")
+    for d in result["board_readiness"]:
+        if d["id"] == "decision_clarity" and d["score"] is not None and d["score"] > 2:
+            d.update(score=2, comment="No slide states the decision the board is asked to take.")
 
 
 def _sub01(ctx):

@@ -104,8 +104,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/template/upload":
             return self._guard(self._template_upload)
         if path == "/api/export/pptx":
-            return self._guard(lambda: self._file(*self.studio.export_pptx(self._read_json()),
-                                                  ctype="application/vnd.openxmlformats-officedocument.presentationml.presentation"))
+            def export():
+                name, data, notice = self.studio.export_pptx(self._read_json())
+                self._file(name, data, "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                           {"X-Studio-Notice": notice} if notice else None)
+            return self._guard(export)
         if path == "/api/export/briefing":
             return self._guard(lambda: self._file(*self.studio.export_briefing(self._read_json()),
                                                   ctype="text/markdown; charset=utf-8"))
@@ -187,10 +190,10 @@ class Handler(BaseHTTPRequestHandler):
     def _error(self, status, message):
         self._json({"error": message}, status)
 
-    def _file(self, filename, data, ctype):
+    def _file(self, filename, data, ctype, headers=None):
         ascii_name = filename.encode("ascii", "ignore").decode() or "download"
         disp = 'attachment; filename="%s"; filename*=UTF-8\'\'%s' % (ascii_name.replace('"', ""), urllib.parse.quote(filename))
-        self._send(HTTPStatus.OK, data, ctype, {"Content-Disposition": disp, "Cache-Control": "no-store"})
+        self._send(HTTPStatus.OK, data, ctype, dict({"Content-Disposition": disp, "Cache-Control": "no-store"}, **(headers or {})))
 
     def _static(self, rel):
         target = (STATIC / urllib.parse.unquote(rel)).resolve()

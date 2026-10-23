@@ -8,6 +8,7 @@ API layer can fall back to built-in rules instead of failing the user.
 """
 import json
 import re
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -53,6 +54,7 @@ class LLMClient:
         self._json_mode = bool(cfg.get("llm_json_mode", True))
         self._token_param = "max_tokens"  # some newer models (e.g. OpenAI's gpt-5/o-series) require max_completion_tokens
         self._health = (0.0, None)
+        self._health_lock = threading.Lock()
 
     @property
     def enabled(self):
@@ -147,39 +149,45 @@ class LLMClient:
         return parse_json(self.chat(system, user, json_mode=True, **kw))
 
     def health(self, max_age=30):
-        """Cheap reachability check, cached for max_age seconds."""
+        """Cheap reachability check, cached for max_age seconds. Bounded to about 8 s: two quick
+        attempts, never the full chat retry budget (5 x (5 s + 1.5 s) used to hold /api/health for
+        ~30 s against a flaky endpoint, long enough for browsers to give up on it). Concurrent
+        callers share one check rather than each starting their own."""
         ts, cached = self._health
         if cached is not None and time.time() - ts < max_age:
             return cached
+        with self._health_lock:
+            ts, cached = self._health
+            if cached is not None and time.time() - ts < max_age:
+                return cached  # another request finished the check while this one waited
+            result = self._check_health()
+            self._health = (time.time(), result)
+            return result
+
+    def _check_health(self):
         if not self.enabled:
-            result = {"enabled": False, "reachable": False, "model": self.display_name,
-                      "detail": "The AI service is switched off in the server settings."}
-        else:
-            last_err = None
-            attempts = int(self.cfg.get("llm_max_retries", 5))
-            for attempt in range(attempts):
-                try:
-                    req = urllib.request.Request(self.base + "/models", headers=self._headers())
-                    with self.opener.open(req, timeout=5):
-                        pass
+            return {"enabled": False, "reachable": False, "model": self.display_name,
+                    "detail": "The AI service is switched off in the server settings."}
+        last_err = None
+        for attempt in range(2):
+            try:
+                req = urllib.request.Request(self.base + "/models", headers=self._headers())
+                with self.opener.open(req, timeout=3.5):
+                    pass
+                last_err = None
+                break
+            except urllib.error.HTTPError as e:
+                # The server answered, so it is reachable even if /models isn't exposed.
+                if e.code in (404, 405):
                     last_err = None
                     break
-                except urllib.error.HTTPError as e:
-                    # The server answered, so it is reachable even if /models isn't exposed.
-                    if e.code in (404, 405):
-                        last_err = None
-                        break
-                    last_err = e
-                    if attempt < attempts - 1:
-                        time.sleep(1.5)
-                except Exception as e:  # noqa: BLE001
-                    last_err = e
-                    if attempt < attempts - 1:
-                        time.sleep(1.5)
-            result = {"enabled": True, "reachable": last_err is None, "model": self.display_name,
-                      "detail": "" if last_err is None else _describe(last_err)}
-        self._health = (time.time(), result)
-        return result
+                last_err = e
+            except Exception as e:  # noqa: BLE001
+                last_err = e
+            if attempt == 0:
+                time.sleep(0.5)
+        return {"enabled": True, "reachable": last_err is None, "model": self.display_name,
+                "detail": "" if last_err is None else _describe(last_err)}
 
 
 def _error_text(err):
