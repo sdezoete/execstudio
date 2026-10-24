@@ -368,10 +368,10 @@ def add_headline_slide(prs, layout, headline, tpl):
     return slide
 
 
-def write_notes(slide, notes, source=""):
+def write_notes(slide, notes, source="", source_label="Source: "):
     text = (notes or "").strip()
     if source:
-        text += ("\n" if text else "") + "Source: " + source
+        text += ("\n" if text else "") + source_label + source
     if text:
         slide.notes_slide.notes_text_frame.text = text
 
@@ -406,7 +406,7 @@ def build(title, slides, meta, tpl, template_path=None, template_bytes=None, tem
             c = PptxCanvas(slide, tpl)
             layouts.draw(c, s, content_area(prs, slide))
             footer(prs, c, i, total, meta, s)
-        write_notes(slide, layouts.notes_text(s), (s.get("evidence") or {}).get("source", ""))
+        write_notes(slide, layouts.notes_text(s), (s.get("evidence") or {}).get("source", ""), layouts.label(s, "Source: "))
     cp = prs.core_properties
     cp.title = title[:250]
     cp.author = meta.get("author", "Executive Presentation Studio")

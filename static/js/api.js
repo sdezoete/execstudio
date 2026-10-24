@@ -70,8 +70,9 @@
     }
     var name = fallbackName;
     var cd = res.headers.get("Content-Disposition") || "";
-    var m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd);
-    if (m) name = decodeURIComponent(m[1]);
+    // prefer the UTF-8 filename*: the plain filename= is an ASCII fallback, which turns an Arabic title into "____"
+    var m = /filename\*=UTF-8''([^;]+)/i.exec(cd) || /filename="?([^";]+)"?/i.exec(cd);
+    if (m) { try { name = decodeURIComponent(m[1]); } catch (e) { name = m[1]; } }
     var blob = await res.blob();
     var url = URL.createObjectURL(blob);
     var a = document.createElement("a");

@@ -1,5 +1,6 @@
 """Validation and normalisation of data coming from the browser or the LLM."""
 import datetime as _dt
+import re
 
 from .catalog import (AUDIENCE_BY_ID, BOARD_EXTERNAL_ONLY, BOARD_READINESS_DIMENSIONS, BOARD_RULES,
                        KINDS, LENGTHS, PRESENTATION_TYPES, STAGE_GATES)
@@ -85,6 +86,13 @@ def _num(v):
     return None
 
 
+_PERCENT_SERIES = re.compile(r"%|٪|\b(percent|pct|rate|margin|share|ratio|yield)\b|نسبة|هامش|معدل|حصة", re.I)
+
+
+def _series_unit(name):
+    return "%" if _PERCENT_SERIES.search(name or "") else "amount"
+
+
 def chart(raw):
     """Normalise a chart spec; returns None unless it has categories and fully numeric, matching series."""
     if not isinstance(raw, dict):
@@ -100,6 +108,10 @@ def chart(raw):
         series.append({"name": _s(s.get("name"), 60) or "Series", "values": vals})
     if not cats or not series:
         return None
+    # one value axis: a percentage series next to SAR millions plots as a flat line at zero. Keep the series
+    # that share the first series' unit (round 6: a chart mixing SAR and %)
+    units = [_series_unit(s["name"]) for s in series]
+    series = [s for s, u in zip(series, units) if u == units[0]]
     return {"type": raw.get("type") if raw.get("type") in CHART_TYPES else "column",
             "title": _s(raw.get("title"), 120), "categories": cats, "series": series}
 

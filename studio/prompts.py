@@ -37,7 +37,8 @@ def _brief_block(brief, context):
     return text
 
 
-def storyline(brief, version, context):
+def storyline(brief, version, context, invented=None):
+    """invented: figures a first answer used that appear nowhere in the brief or the material."""
     lo, hi = slide_range(brief.get("length"), version, brief.get("task"))
     task = brief.get("task")
     extra = []
@@ -84,7 +85,8 @@ def storyline(brief, version, context):
         "- chart: ONLY when the provided material contains the actual numbers, add a chart object to a "
         "\"bars\" slide: {\"type\": \"column\" or \"bar\" or \"line\" or \"stacked\", \"title\": string, "
         "\"categories\": [string], \"series\": [{\"name\": string, \"values\": [number]}]}. Every series has "
-        "one value per category. Copy numbers exactly; never estimate. Otherwise omit chart.\n"
+        "one value per category. Copy numbers exactly; never estimate. All series in one chart share one unit "
+        "(never SAR amounts next to percentages; chart the main one). Otherwise omit chart.\n"
         "- Audience: " + _audience(brief)["guidance"] + "\n"
         + "".join("- " + e + "\n" for e in extra) +
         "- Write in the language of the brief.\n\n"
@@ -92,7 +94,11 @@ def storyline(brief, version, context):
         '"body": [string], "visual": string, "notes": string, "chart": object (optional), '
         '"evidence": {"status": "linked" or "needed", "source": string, "gap": string}}]}'
     )
-    return system, _brief_block(brief, context)
+    user = _brief_block(brief, context)
+    if invented:
+        user += ("\n\nYOUR PREVIOUS ANSWER WAS REJECTED: it used figures that are not in the brief or the material ("
+                 + ", ".join(invented) + "). Replace every one of them with a [placeholder], or leave it out.")
+    return system, user
 
 
 def transform(slides, actions, brief, feedback=None):
@@ -225,6 +231,7 @@ def board_assessment(brief, slides, ctx):
         for r in BOARD_RULES if r["id"] != "SUB-01"
     )
     external_ids = ", ".join(sorted(BOARD_EXTERNAL_ONLY))
+    critical_ids = " and ".join(r["id"] for r in BOARD_RULES if r.get("critical"))
     dims_text = "\n".join("- %s: %s" % (d["id"], d["label"]) for d in BOARD_READINESS_DIMENSIONS)
 
     ctx_lines = []
@@ -262,8 +269,10 @@ def board_assessment(brief, slides, ctx):
         "SEPARATELY, score BOARD READINESS 1 (poor) to 5 (excellent) for each dimension below, with a one-sentence "
         "comment explaining the score:\n" + dims_text + "\n\n"
         "Then write a 2-3 sentence overall summary covering both the compliance outcome and board readiness. "
-        "A deck that FAILS any critical requirement is not board-ready, however good the scores: say so first, "
-        "and never call it ready.\n\n"
+        "The ONLY critical requirements are " + critical_ids + ". A deck that FAILS one of them is not board-ready, "
+        "however good the scores: say so first, and never call it ready. Any other requirement, however "
+        "important (for example a missing progress gauge), is never critical and never makes a deck not "
+        "board-ready: describe it as something still to fix.\n\n"
         'Return JSON only: {"compliance": [{"id": string, "result": string, "evidence": string, "action": string}], '
         '"board_readiness": {"<dimension id>": {"score": number, "comment": string}}, "summary": string}'
     )

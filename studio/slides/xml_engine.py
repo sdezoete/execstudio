@@ -208,7 +208,7 @@ def build(title, slides, meta, tpl):
         notes = layouts.notes_text(s)
         ev = s.get("evidence") or {}
         if ev.get("source"):
-            notes += "\nSource: " + ev["source"]
+            notes += "\n" + layouts.label(s, "Source: ") + ev["source"]
         files["ppt/notesSlides/notesSlide%d.xml" % i] = _notes_xml(notes_ctx, notes)
         files["ppt/notesSlides/_rels/notesSlide%d.xml.rels" % i] = _rels([
             ("rId1", "notesMaster", "../notesMasters/notesMaster1.xml"),

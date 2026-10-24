@@ -602,7 +602,7 @@
       '</span><button class="btn btn-ghost" type="button" id="reboard">Re-run</button></div>';
     if (r.warning) html += '<p class="note" style="padding:6px 20px 0">' + esc(r.warning) + "</p>";
     // with a critical failure the banner below states the verdict, so show the rest of the summary only
-    var summary = r.verdict ? r.summary_detail : r.summary;
+    var summary = r.verdict && rd.critical_fails && rd.critical_fails.length ? r.summary_detail : r.summary;
     if (summary) html += '<p class="note" style="padding:10px 20px 0;max-width:80ch">' + esc(summary) + "</p>";
 
     if (rd.critical_fails && rd.critical_fails.length) {

@@ -17,6 +17,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 TRANSFORM_MODE = "merge"
 TRANSFORM_CALLS = []   # slide indices of every transform request, so tests can see retries
 SHARPEN_REPLIES = []   # headlines to return first, before the default good one
+# storyline answers that add an invented figure ("Pilot in 15 stores"): "first" only on the first answer,
+# "always" on retries too; STORY_CALLS counts storyline requests
+STORY_INVENT = ""
+STORY_CALLS = []
 
 
 def _simplify(body):
@@ -134,6 +138,10 @@ class H(BaseHTTPRequestHandler):
         if "storyline" in system or "answer-first storyline" in system:
             brief = _parse_brief_block(req["messages"][1]["content"])
             out = _dynamic_storyline(brief) if brief.get("topic") else STORYLINE
+            STORY_CALLS.append(1)
+            if STORY_INVENT == "always" or (STORY_INVENT == "first" and len(STORY_CALLS) == 1):
+                out = json.loads(json.dumps(out))
+                out["slides"][-1]["body"] = list(out["slides"][-1]["body"]) + ["Pilot in 15 stores by March 2028"]
         elif "hardest questions" in system:
             out = QA
         elif "recommend the single best slide" in system:
@@ -152,7 +160,7 @@ class H(BaseHTTPRequestHandler):
                    "board_readiness": {d: {"score": 5 if d == "decision_clarity" else 4, "comment": "Good."} for d in (
                        "decision_clarity", "executive_relevance", "message_titles", "evidence", "conciseness",
                        "decision_flow", "technical_depth", "consistency", "risk_visibility", "closing_decision")},
-                   "summary": "Ready."}
+                   "summary": "This deck is not board-ready because it fails the critical PRES-07 requirement. Message titles are crisp. Ready."}
         elif "pre-read" in system:
             out = {"brief": "## Context\nTest brief."}
         else:

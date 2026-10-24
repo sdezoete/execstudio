@@ -13,8 +13,8 @@ from pathlib import Path
 
 from . import __version__, catalog, fallback, prompts, review, schema
 from . import slides as slide_engine
-from .checks import (MAX_HEADLINE_WORDS, clean_storyline, headline_problem, missing_facts, rewrite_problem,
-                     slides_stating_ask)
+from .checks import (MAX_HEADLINE_WORDS, clean_storyline, flag_invented, headline_problem, invented_figures,
+                     missing_facts, numbers, rewrite_problem, slides_stating_ask)
 from .config import ROOT
 from .extract import PDF_SUPPORTED, ExtractError, extract
 from .llm import LLMClient, LLMError
@@ -105,15 +105,23 @@ class Studio:
         ctx = self._context(b, str(payload.get("context") or ""))
         lo, hi = catalog.slide_range(b["length"], version, b["task"])
 
+        source_figures = numbers(" ".join([b["topic"], b["decision"], ctx]))
+
         def call():
             system, user = prompts.storyline(b, version, ctx)
             data = schema.storyline(self.llm.chat_json(system, user), b["topic"])
+            invented = invented_figures(data["slides"], source_figures)
+            if invented:
+                # every figure must come from the brief (round 6: an invented plan when the brief had no facts)
+                system, user = prompts.storyline(b, version, ctx, invented=invented)
+                data = schema.storyline(self.llm.chat_json(system, user), b["topic"])
             data["slides"] = clean_storyline(data["slides"][:max(hi, 1)], bool(ctx))
             if len(data["slides"]) < lo:
                 # e.g. one "please send me facts" slide when no facts were given (test report D-09)
                 raise ValueError("the AI returned %d slide%s, fewer than the %d asked for"
                                  % (len(data["slides"]), "" if len(data["slides"]) == 1 else "s", lo))
             self._shorten_headlines(data["slides"], b)
+            flag_invented(data["slides"], source_figures)
             return data
 
         result, meta = self._ai("storyline", call, lambda: fallback.storyline(b, version), b)
@@ -177,6 +185,7 @@ class Studio:
 
         result, meta = self._ai("board_assessment", call, lambda: fallback.board_assessment(b, slides, ctx), b)
         _enforce_decision_slide(result, slides, b["decision"])
+        _enforce_opening_ask(result, slides, b["decision"])
         result["compliance"].insert(0, _sub01(ctx))
         result["readiness"] = _readiness(result)
         result["summary"] = _settle_summary(result)
@@ -534,6 +543,8 @@ def _readiness(result):
 
 # any sentence about readiness: the verdict sentence now owns that topic
 _READY_CLAIM = re.compile(r"\b(ready|readiness|well prepared|strong on|strong overall)\b", re.I)
+# a sentence claiming a critical failure, on a deck where none fails
+_CRITICAL_CLAIM = re.compile(r"\bcritical\b", re.I)
 # praise words; "well" only as "well sourced" / "well-structured", so "thin as well" is not praise
 _PRAISE = re.compile(r"\b(strong|clear|good|excellent|solid|effective|compelling|robust|high|well[- ]\w+ed)\b", re.I)
 _NEGATED = re.compile(r"\b(not|no|never|hardly|lacks?|lacking)\s+(?:\w+\s+)?$", re.I)
@@ -551,13 +562,23 @@ def _settle_summary(result):
     sentences claiming readiness, or praising a dimension that was capped, are dropped."""
     rd = result["readiness"]
     summary = result.get("summary") or ""
+    sentences = [x for x in re.split(r"(?<=[.!?])\s+", summary) if x.strip()]
     if rd["board_ready"]:
-        return summary
+        # the model also misreads non-critical checks as critical and calls a passing deck "not
+        # board-ready because it fails the critical PRES-07" (round 7); the verdict comes from the checks
+        open_items = [c for c in result["compliance"] if not c.get("critical") and c["result"] in ("FAIL", "WARNING")]
+        verdict = "Board-ready: no critical check fails."
+        if open_items:
+            verdict += " Still to fix: %s." % "; ".join("%s (%s)" % (c["id"], c["requirement"][:1].lower() + c["requirement"][1:].rstrip("."))
+                                                       for c in open_items[:4])
+        keep = [x for x in sentences if not _READY_CLAIM.search(x) and not _CRITICAL_CLAIM.search(x)]
+        result["verdict"], result["summary_detail"] = verdict, " ".join(keep)
+        return " ".join([verdict] + keep)
     failing = [c for c in result["compliance"] if c["id"] in rd["critical_fails"]]
     capped_dims = [d["label"].lower() for d in result["board_readiness"] if d["score"] is not None and d["score"] <= 3]
     # drop praise of a dimension that scored 3 or less, but keep criticism of it ("Evidence is thin"); a
     # sentence that praises it in passing ("clear, though the timeline could be tighter") still goes
-    keep = [x for x in re.split(r"(?<=[.!?])\s+", summary) if x.strip() and not _READY_CLAIM.search(x)
+    keep = [x for x in sentences if not _READY_CLAIM.search(x)
             and not (any(dim in x.lower() for dim in capped_dims) and _praises(x))]
     verdict = "Not board-ready: critical check%s %s fail%s (%s)." % (
         "s" if len(failing) > 1 else "", ", ".join(c["id"] for c in failing), "" if len(failing) > 1 else "s",
@@ -567,6 +588,23 @@ def _settle_summary(result):
     # the page shows the verdict in its banner, so it also gets the two halves (no verdict twice in a row)
     result["verdict"], result["summary_detail"] = verdict, " ".join(keep)
     return " ".join([verdict] + keep)
+
+
+def _enforce_opening_ask(result, slides, decision):
+    """PRES-03 decided from the same "which slides state the ask" as PRES-08. The model failed it about one
+    run in ten on a deck whose first slide plainly states the ask (round 6/7), and the rule is mechanical:
+    the cover or the first content slide states the action required, or it does not."""
+    content = [i for i, s in enumerate(slides, 1) if s.get("kind") != "title"]
+    opening = {1} | set(content[:1])
+    stated = [i for i in slides_stating_ask(slides, decision) if i in opening]
+    for c in result["compliance"]:
+        if c["id"] != "PRES-03":
+            continue
+        if stated and c["result"] != "PASS":
+            c.update(result="PASS", evidence="Slide %d states the action required from GEC/GIC." % stated[0], action="")
+        elif not stated and c["result"] == "PASS" and (decision or "").strip():  # no decision: the model judges
+            c.update(result="FAIL", evidence="Neither the cover nor the first content slide states the action required.",
+                     action="Open with the decision you need from GEC/GIC.")
 
 
 def _enforce_decision_slide(result, slides, decision):

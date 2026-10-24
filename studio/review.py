@@ -127,7 +127,9 @@ _BRIDGE = re.compile(r"\b(contribut\w*|added|adds|drove|driven|due to|impact\w*|
 # a part line may name the change it feeds ("Freight added 0.9 points to the decline", "Lower volume reduced
 # EBIT by EUR 5.0m"). "driven by" and "due to" are deliberately absent: they explain a line's OWN movement
 # ("Churn up 0.6 pts driven by the price rise"), and such a line is a separate KPI, not a part
-_CONTRIBUTES = re.compile(r"\b(contribut\w*|added|adds|drove|accounts? for|accounted for)\b", re.I)
+_CONTRIBUTES = re.compile(r"\b(contribut\w*|added|adds|drove|accounts? for|accounted for|offset\w*)\b", re.I)
+# a part that works against the others ("Higher costs offset SAR 9m", "partly offset by", "FX was a drag of")
+_OFFSET = re.compile(r"\b(offset\w*|cushion\w*|mitigat\w*|counter\w*|drag(ged)? of|weighed|headwind)\b", re.I)
 _ACTS_ON = re.compile(r"\b(?:reduced|cut|lifted|raised|lowered|increased)\s+(\w+)\s+by\b", re.I)
 
 
@@ -143,6 +145,36 @@ def _contributes(line, total_line):
 def _acts_on_other(line, total_line):
     """"We cut costs by EUR 1.5m" under a revenue total: an action on something else, never a part."""
     return any(m.group(1).lower() not in (total_line or "").lower() for m in _ACTS_ON.finditer(line))
+
+
+# Arabic slides: digits, separators, units and the keywords the rules look for are mapped onto their English
+# forms before checking, so one set of rules serves both languages. Arabic attaches prefixes (و ف ب ل ال)
+# and suffixes (ت ة ات ا وا) to words, hence the tolerant word pattern.
+_AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹٫٬٪", "01234567890123456789.,%")
+_AR_WORDS = [
+    (("نقطة مئوية", "نقاط مئوية", "نقطة", "نقاط"), " pts "),
+    (("مليون", "ملايين"), " m "), (("مليار", "مليارات"), " bn "), (("ألف", "آلاف"), " k "),
+    (("انخفض", "انخفاض", "تراجع", "هبط", "ارتفع", "ارتفاع", "زاد", "زيادة", "نما", "نمو", "تحسن"), " changed "),
+    (("إجمالي", "اجمالي", "المجموع", "مجموع", "الكلي"), " total "),
+    (("ساهم", "مساهمة", "أضاف", "اضاف"), " contributed "),
+    (("عوض", "عوّض", "خفف", "قابله"), " offset "),
+    (("الخطة", "خطة", "المستهدف", "مستهدف", "المخطط", "الميزانية", "التوقعات"), " plan "),
+    (("مقابل",), " vs "), (("زائد",), " plus "), (("يساوي", "تساوي"), " equals "),
+    (("أخرى", "اخرى", "الباقي", "المتبقي", "أبرز", "أهم", "الرئيسية", "الرئيسي"), " other "),
+    (("حصة", "توزيع", "مزيج"), " share "),
+]
+_AR_WORD_RES = [(re.compile(r"(?<![؀-ۿ])(?:[وفبل]|وال|بال|لل|فال|ال)?(?:%s)(?:ت|ة|ات|ا|وا|ه)?(?![؀-ۿ])"
+                            % "|".join(map(re.escape, sorted(words, key=len, reverse=True)))), repl) for words, repl in _AR_WORDS]
+
+
+def _norm(text):
+    """Arabic text mapped onto the English forms the rules use; English text comes back unchanged."""
+    text = (text or "").translate(_AR_DIGITS)
+    if re.search(r"[؀-ۿ]", text):
+        for rx, repl in _AR_WORD_RES:
+            text = rx.sub(repl, text)
+        text = text.replace("ـ", "")  # tatweel ("بـ ٠٫٩")
+    return text
 
 
 def _signed(s):
@@ -203,6 +235,8 @@ def _sum_problem(slide):
       Parts are the contributor lines ("Freight +0.9 pts", "contributed 1.6 points"), never lines that
       state a change of their own: a list of separate KPI movements is not a bridge;
     - shares of a whole that add up to more than 100%."""
+    slide = dict(slide, headline=_norm(slide["headline"]), body=[_norm(b) for b in slide["body"]],
+                 notes=_norm(slide.get("notes")))
     lines = [slide["headline"]] + list(slide["body"])
     text = " ".join(lines + [slide.get("notes") or ""])
 
@@ -224,16 +258,24 @@ def _sum_problem(slide):
         value, unit, total_line = total
         # a line carrying the total's own value restates it ("together they explain the full 2.1-point
         # decline"); it is not one more part
-        parts = [p for b in slide["body"] if b != total_line and not _COMPARISON.search(b) and not _EQUATION.search(b)
-                 and not _TOTAL.search(b) and not (_CHANGE.search(b) and not _contributes(b, total_line))
-                 and not _acts_on_other(b, total_line) and not any(_close(x, value) for x, _u in _qty(b, unit))
-                 for p in _parts(b, unit)]
+        part_lines = [b for b in slide["body"] if b != total_line and not _COMPARISON.search(b) and not _EQUATION.search(b)
+                      and not _TOTAL.search(b) and not (_CHANGE.search(b) and not _contributes(b, total_line))
+                      and not _acts_on_other(b, total_line) and not any(_close(x, value) for x, _u in _qty(b, unit))]
+        parts = [p + (bool(_OFFSET.search(b)),) for b in part_lines for p in _parts(b, unit)]
         if len(parts) >= 2:
-            signs = {v > 0 for v, explicit in parts if explicit}
-            # mixed signs (volume -5, price +2) net off; otherwise every part pushes the same way, whatever
-            # sign the author wrote ("+0.9 pts of pressure" on a margin decline)
-            s = round(abs(sum(v for v, _e in parts)) if len(signs) > 1 else sum(abs(v) for v, _e in parts), 4)
-            shown = " ".join(("%+g" % v) if len(signs) > 1 else ("+ %g" % abs(v)) for v, _e in parts).lstrip("+ ") + " = %g %s" % (s, unit)
+            signs = {v > 0 for v, explicit, _o in parts if explicit}
+            if any(o for _v, _e, o in parts):
+                # "costs offset SAR 9m": an offsetting part works against the others (15 + 6 - 9 = 12)
+                vals = [-abs(v) if o else abs(v) for v, _e, o in parts]
+            elif len(signs) > 1:
+                # mixed signs (volume -5, price +2) net off
+                vals = [v for v, _e, _o in parts]
+            else:
+                # every part pushes the same way, whatever sign the author wrote ("+0.9 pts of pressure" on a
+                # margin decline)
+                vals = [abs(v) for v, _e, _o in parts]
+            s = round(abs(sum(vals)), 4)
+            shown = ("%g" % vals[0]) + "".join((" + %g" if v >= 0 else " - %g") % abs(v) for v in vals[1:]) + " = %g %s" % (s, unit)
             if s > value and not _close(s, value):
                 return "the parts (%s) are more than the total of %g %s" % (shown, value, unit)
             if _close(s, value) and _PHANTOM.search(text):

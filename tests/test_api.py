@@ -131,6 +131,8 @@ class WithLLM(Base):
         from studio.checks import clean_storyline
         out = clean_storyline([{"notes": "Please share the data.", "evidence": {"status": "linked", "source": "SOURCE DOCUMENTS"}}], False)
         self.assertEqual((out[0]["notes"], out[0]["evidence"]["status"]), ("", "needed"))
+        out = clean_storyline([{"notes": "", "evidence": {"status": "needed", "source": "No source documents provided", "gap": "No facts"}}], False)
+        self.assertEqual(out[0]["evidence"]["source"], "")                  # seen live in round 7
 
     def test_storyline_long_headlines_shortened(self):  # retest side note: a 16-word generated headline
         topic = "quarterly review of warehouse safety incidents and the corrective actions taken across all regional sites"
@@ -222,6 +224,63 @@ class WithLLM(Base):
             self.assertTrue(_sum_problem(sl), sl)
         for sl in must_pass:
             self.assertEqual(_sum_problem(sl), "", sl)
+
+    def test_storyline_invented_figures(self):  # round 6: an invented plan when the brief had no facts
+        for mode, calls, flagged in (("first", 2, False), ("always", 2, True)):
+            mock_llm.STORY_INVENT, mock_llm.STORY_CALLS[:] = mode, []
+            try:
+                s = json.loads(self.post("/api/storyline", {"brief": BRIEF, "version": "full"})[2])
+            finally:
+                mock_llm.STORY_INVENT = ""
+            self.assertEqual(len(mock_llm.STORY_CALLS), calls, mode)          # asked once, re-asked once
+            last = s["slides"][-1]
+            if flagged:                                                     # still invented after the retry
+                self.assertEqual(last["evidence"]["status"], "needed")
+                self.assertIn("15", last["evidence"]["gap"])
+                self.assertIn("2028", last["evidence"]["gap"])
+            else:
+                self.assertNotIn("15 stores", " ".join(last["body"]))
+        mock_llm.STORY_CALLS[:] = []
+        self.post("/api/storyline", {"brief": BRIEF, "version": "full"})
+        self.assertEqual(len(mock_llm.STORY_CALLS), 1)                      # a faithful answer is not re-asked
+
+    def test_round6_arabic_offset_chart(self):
+        from studio.review import _sum_problem
+        from studio import schema
+        s = lambda k, h, b: {"kind": k, "headline": h, "body": b, "notes": ""}  # noqa: E731
+        # offset bridges subtract the offsetting part
+        self.assertEqual(_sum_problem(s("summary", "EBIT rose SAR 12m", ["Volume added SAR 15m", "Price added SAR 6m", "Higher costs offset SAR 9m"])), "")
+        self.assertTrue(_sum_problem(s("summary", "EBIT rose SAR 12m", ["Volume added SAR 15m", "Price added SAR 6m", "Higher costs offset SAR 4m"])))
+        # the figures check on Arabic slides
+        self.assertTrue(_sum_problem(s("summary", "انخفض هامش الربح الإجمالي ٢٫١ نقطة", ["ساهم الشحن بـ ٠٫٩ نقطة", "ساهمت المواد الخام بـ ١٫٦ نقطة"])))
+        self.assertEqual(_sum_problem(s("summary", "انخفض هامش الربح ٢٫١ نقطة", ["ساهم الشحن بـ ٠٫٩ نقطة", "ساهمت المواد الخام بـ ١٫٢ نقطة"])), "")
+        self.assertTrue(_sum_problem(s("bars", "إجمالي الإيرادات ٤٨٫٢ مليون ريال", ["الشمال ٢٠ مليون ريال", "الجنوب ١٥ مليون ريال", "الغرب ١٠ مليون ريال"])))
+        self.assertTrue(_sum_problem(s("summary", "حصة المؤسسات هي الأكبر", ["حصة المؤسسات ٥٥٪ من الإيرادات", "الشركات المتوسطة ٣٥٪", "الشركات الصغيرة ٢٠٪"])))
+        self.assertEqual(_sum_problem(s("driver", "انخفضت الإيرادات ٢٫٨ مليون ريال عن الخطة",
+                                        ["الإيرادات ٤٨٫٢ مليون ريال مقابل الخطة ٥١ مليون ريال", "فجوة ٢٫٨ مليون ريال"])), "")
+        self.assertEqual(_sum_problem(s("kpi", "مؤشرات الربع الثالث", ["انخفض الهامش ٢٫١ نقطة", "ارتفع معدل التسرب ٠٫٦ نقطة", "انخفض مؤشر الرضا ٣ نقاط"])), "")
+        # one unit per chart
+        ch = schema.chart({"categories": ["Q1", "Q2"], "series": [{"name": "Revenue (SAR m)", "values": [48.2, 51]},
+                                                                  {"name": "Gross margin %", "values": [31.4, 33.5]}]})
+        self.assertEqual([x["name"] for x in ch["series"]], ["Revenue (SAR m)"])
+
+    def test_arabic_export_labels_and_filename(self):  # round 6: English labels and "____2026" names
+        from pptx import Presentation
+        slides = [{"kind": "summary", "headline": "انخفضت الحوادث بعد التدريب", "body": ["نقطة %d" % k for k in range(1, 8)],
+                   "evidence": {"status": "linked", "source": "تقرير السلامة"}},
+                  {"kind": "roadmap", "headline": "الخطوات التالية", "body": ["تقييم المواقع", "تدريب الفرق", "مراجعة النتائج"]}]
+        st, h, body = self.post("/api/export/pptx", {"brief": BRIEF, "title": "مراجعة السلامة", "slides": slides})
+        self.assertEqual(st, 200)
+        self.assertIn("presentation_", h["Content-Disposition"].split("filename*")[0])  # readable ASCII fallback
+        self.assertIn("UTF-8''%D9%85", h["Content-Disposition"])                         # the Arabic name itself
+        prs = Presentation(io.BytesIO(body))
+        texts = " ".join(sh.text_frame.text for s in prs.slides for sh in s.shapes if sh.has_text_frame)
+        notes = " ".join(s.notes_slide.notes_text_frame.text for s in prs.slides)
+        for english in ("Source:", "Phase 1", "Moved from the slide"):
+            self.assertNotIn(english, texts + notes)
+        self.assertIn("المصدر:", texts)
+        self.assertIn("المرحلة 1", texts)
+        self.assertIn("نُقل من الشريحة:", notes)
 
     def test_summary_keeps_criticism_drops_praise(self):  # quality-check suggestion on S-01
         from studio.services import _praises
@@ -562,6 +621,27 @@ class Decks(Base):
         self.assertEqual(next(c for c in r["compliance"] if c["id"] == "PRES-08")["result"], "PASS")
         self.assertFalse(r["readiness"]["capped"])                       # no critical failure: no cap
         self.assertGreater(r["readiness"]["score"], 2.5)
+        # round 7: a passing deck never reads "not board-ready because it fails the critical PRES-07"
+        self.assertTrue(r["summary"].startswith("Board-ready: no critical check fails."), r["summary"])
+        self.assertNotIn("not board-ready", r["summary"].lower())
+        self.assertNotIn("critical PRES-07", r["summary"])
+        self.assertIn("Message titles are crisp.", r["summary"])               # the model's other sentences stay
+
+    def test_board_pres03_decided_from_slides(self):  # round 6/7: PRES-03 failed by mistake ~1 run in 10
+        from studio.services import _enforce_opening_ask
+        def run(slides, model_says, decision="Approve a 3% price increase"):
+            result = {"compliance": [{"id": "PRES-03", "result": model_says, "evidence": "", "action": ""}]}
+            _enforce_opening_ask(result, slides, decision)
+            return result["compliance"][0]["result"]
+        opener = [{"kind": "title", "headline": "Q3 review", "body": []},
+                  {"kind": "summary", "headline": "Approve a 3% price increase to defend margin", "body": ["Margin down 2.1 pts"]}]
+        self.assertEqual(run(opener, "FAIL"), "PASS")                          # the model's false FAIL is corrected
+        late = [{"kind": "title", "headline": "Q3 review", "body": []}, {"kind": "kpi", "headline": "Margin fell 2.1 pts", "body": ["Freight"]},
+                {"kind": "decision", "headline": "Approve a 3% price increase", "body": []}]
+        self.assertEqual(run(late, "PASS"), "FAIL")                            # ask only at the end: not an opening ask
+        self.assertEqual(run(late, "PASS", decision=""), "PASS")               # no decision in the brief: model judges
+        info = [{"kind": "summary", "headline": "For information: safety incidents fell 12%", "body": []}]
+        self.assertEqual(run(info, "FAIL", decision=""), "PASS")
 
     def test_board_rejects_meeting_before_submission(self):  # D-07
         slides = [{"kind": "decision", "headline": "Approve a 3% price increase", "body": ["Approve today"]}]

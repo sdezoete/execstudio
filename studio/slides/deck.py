@@ -18,6 +18,7 @@ from pptx.oxml.ns import qn
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
 
+from . import layouts
 from . import pptx_engine as eng
 from .pptx_engine import inches
 
@@ -546,9 +547,11 @@ def retemplate(data, indices, changes, tpl, meta, template_path, template_bytes=
         notes = s.notes_slide.notes_text_frame.text if s.has_notes_slide and s.notes_slide.notes_text_frame else ""
         extra = lines[(8 if visuals else 10):]
         if extra:
-            notes = (notes + "\n\nMoved from the slide:\n" + "\n".join("- " + x for x in extra)).strip()
+            notes = (notes + "\n\n" + layouts.label({"headline": head, "body": lines}, "Moved from the slide:") + "\n"
+                     + "\n".join("- " + x for x in extra)).strip()
         if small_print:
-            notes = (notes + "\n\nSmall print on the original slide:\n" + "\n".join("- " + x for x in small_print)).strip()
+            notes = (notes + "\n\n" + layouts.label({"headline": head, "body": lines}, "Small print on the original slide:") + "\n"
+                     + "\n".join("- " + x for x in small_print)).strip()
         eng.write_notes(slide, notes)
         changes_done = ["Moved onto %s" % meta["template_name"]]
         if ch.get("title") and title is not None and ch["title"].strip() != title.text_frame.text.strip():

@@ -12,6 +12,7 @@ transformation and PDF reading.
 import json
 import logging
 import mimetypes
+import re
 import signal
 import socket
 import ssl
@@ -218,7 +219,10 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"error": message}, status)
 
     def _file(self, filename, data, ctype, headers=None):
-        ascii_name = filename.encode("ascii", "ignore").decode() or "download"
+        # ASCII fallback for clients that ignore filename*: an Arabic title would otherwise become "____2026-…"
+        ascii_name = re.sub(r"_{2,}", "_", filename.encode("ascii", "ignore").decode()).strip("_ ") or "download"
+        if not re.search(r"[A-Za-z]", ascii_name.rsplit(".", 1)[0]):
+            ascii_name = "presentation_" + ascii_name
         disp = 'attachment; filename="%s"; filename*=UTF-8\'\'%s' % (ascii_name.replace('"', ""), urllib.parse.quote(filename))
         self._send(HTTPStatus.OK, data, ctype, dict({"Content-Disposition": disp, "Cache-Control": "no-store"}, **(headers or {})))
 

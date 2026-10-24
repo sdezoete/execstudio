@@ -19,9 +19,14 @@ def _norm_num(s):
     return s.replace(",", "")
 
 
+_AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹٫٬", "01234567890123456789.,")
+_NUM_ASCII = re.compile(r"[0-9]+(?:[.,][0-9]+)*")
+
+
 def numbers(text):
-    """Every number in the text, thousands separators removed ("1,200" == "1200")."""
-    return {_norm_num(m) for m in _NUM.findall(text or "")}
+    """Every number in the text, thousands separators removed ("1,200" == "1200"); Arabic-Indic digits read
+    as their Western forms ("٤٨٫٢" == "48.2")."""
+    return {_norm_num(m) for m in _NUM_ASCII.findall((text or "").translate(_AR_DIGITS))}
 
 
 def names(lines):
@@ -84,7 +89,9 @@ def clean_storyline(slides, has_material):
         if _CHATTER.search(s.get("notes") or ""):
             s["notes"] = ""
         ev = s.get("evidence") or {}
-        if ev.get("source") and _GENERIC_SOURCE.match(ev["source"]):
+        if ev.get("status") != "linked" and ev.get("source"):
+            ev["source"] = ""  # evidence still needed has no source: "No source documents provided" is a note, not one
+        elif ev.get("source") and _GENERIC_SOURCE.match(ev["source"]):
             if has_material:
                 ev["source"] = "Key facts and uploaded material"
             else:
@@ -127,7 +134,8 @@ def direction_problem(original_lines, title):
     return "says they are all %s target, but the figures say: %s" % (claimed, facts)
 
 
-_ASK_VERB = re.compile(r"^\W*(approve|endorse|decide|authori[sz]e|fund|agree|sign off)\b", re.I)
+_ASK_VERB = re.compile(r"^\W*(approve|endorse|decide|authori[sz]e|fund|agree|sign off|note(?!\s*:)|for (information|noting|guidance|approval|decision)|"
+                       r"we (ask|seek|request)|(gec|gic|the committee) (is asked|to approve|to note))\b", re.I)
 
 
 def slides_stating_ask(slides, decision):
@@ -143,6 +151,69 @@ def slides_stating_ask(slides, decision):
                 or (want and sum(w in text for w in want) >= 0.6 * len(want))):
             out.append(i)
     return out
+
+
+def _slide_figures(slide):
+    text = " ".join([slide.get("headline") or ""] + list(slide.get("body") or []) + [slide.get("notes") or ""])
+    ch = slide.get("chart") or {}
+    text += " " + " ".join("%g" % v for s in ch.get("series") or [] for v in s.get("values") or [])
+    return numbers(text)
+
+
+def _derivable(source):
+    """The brief's figures plus what simple arithmetic on two of them gives: the EUR 2.8m miss (51.0 - 48.2)
+    and 2 x EUR 70k = EUR 140k are faithful, not invented."""
+    vals = sorted({float(n) for n in source if n.replace(".", "", 1).isdigit()})[:80]
+    out = set()
+    for i, a in enumerate(vals):
+        for b in vals[i:]:
+            out.update((a + b, abs(a - b)))
+            if any(x.is_integer() and 2 <= x <= 100 for x in (a, b)):  # a count times an amount, not 0.9 x 0.9
+                out.add(a * b)
+    return set(vals), out
+
+
+def _is_year(v):
+    return v.is_integer() and 1990 <= v <= 2100
+
+
+def _unsourced(figures, allowed):
+    """Figures not in `allowed` (within rounding). Whole numbers up to 12 are exempt: quarters, step numbers
+    and small counts ("Q1", "3 priorities") are not the figures this guards."""
+    given, derived = allowed
+    out = []
+    for n in figures:
+        try:
+            v = float(n)
+        except ValueError:
+            continue
+        if v.is_integer() and v <= 12:
+            continue
+        if _is_year(v):  # a year is given or invented, never derived ("March 2028")
+            ok = v in given
+        else:
+            ok = (any(abs(v - a) <= max(0.051, 0.005 * a) for a in given)
+                  or any(abs(v - a) <= max(0.051, 0.002 * a) for a in derived))
+        if not ok:
+            out.append(n)
+    return sorted(out, key=float)
+
+
+def invented_figures(slides, source):
+    """Figures in a storyline that appear nowhere in the brief or the material, nor follow from two of them."""
+    allowed = _derivable(source)
+    return _unsourced(set().union(*[_slide_figures(s) for s in slides]), allowed) if slides else []
+
+
+def flag_invented(slides, source):
+    """Last line of defence after a retry: a slide still carrying a figure that is not in the brief is
+    marked as needing evidence, naming the figures, so nothing invented passes as sourced."""
+    allowed = _derivable(source)
+    for s in slides:
+        extra = _unsourced(_slide_figures(s), allowed)
+        if extra:
+            s["evidence"] = {"status": "needed", "source": "",
+                             "gap": ("Check figures not in your facts: " + ", ".join(extra[:5]))[:120]}
 
 
 def rewrite_problem(original, rewrite):
