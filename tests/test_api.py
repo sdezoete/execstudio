@@ -169,6 +169,18 @@ class WithLLM(Base):
             s("summary", "Revenue is spread across three regions", ["North EUR 20m", "South EUR 15m", "West EUR 10m", "Total EUR 48.2m"]),
             s("summary", "Enterprise leads the revenue mix", ["Enterprise 55% of revenue", "Mid-market 35%", "SMB 20%"]),
             s("driver", "Margin fell 1.8 pts", ["Freight 0.9 pts", "Materials 1.2 pts"]),
+            # round 4: point and currency bridges, in every spelling the tester tried, on any slide kind
+            s("summary", "Freight and raw materials drove the decline", ["Gross margin down 2.1 pts", "Freight +0.9 pts", "Raw materials +1.6 pts"]),
+            s("summary", "Freight and raw materials drove the decline", ["Gross margin down 2.1 pts", "Freight -0.9pp", "Raw materials -1.6pp"]),
+            s("summary", "Freight and raw materials drove the decline", ["Gross margin down 2.1 points", "Freight: 0.9 points", "Raw materials: 1.6 points"]),
+            s("summary", "Margin decline", ["Gross margin fell 2.1 points", "Freight contributed 0.9 points", "Raw materials contributed 1.6 points"]),
+            s("bars", "Operating profit fell EUR 12.0m", ["Volume –EUR 5m", "Price EUR –3m", "Costs EUR –2m"]),
+            # quality-check suggestions: parts that name the change they feed, and a YoY total
+            s("summary", "Margin decline explained", ["Gross margin down 2.1 pts", "Freight added 0.9 points to the decline",
+                                                      "Raw materials added 1.6 points to the decline"]),
+            s("summary", "EBIT fell EUR 12.0m", ["Lower volume reduced EBIT by EUR 5.0m", "Price cut EBIT by EUR 3.0m", "Costs reduced EBIT by EUR 2.0m"]),
+            s("summary", "Freight and materials explain the margin move", ["Gross margin 31.4%, -2.1 pts YoY", "Freight contributed 0.9 pts",
+                                                                           "Raw materials contributed 1.6 pts"]),
         ]
         must_pass = [
             s("driver", "Freight and raw materials explain the full 2.1-point decline",
@@ -179,6 +191,17 @@ class WithLLM(Base):
             s("bars", "Total revenue reached EUR 45m in Q3", ["North EUR 20m", "South EUR 15m", "West EUR 10m"]),
             s("summary", "Enterprise leads the revenue mix", ["Enterprise 55% of revenue", "Mid-market 35%", "SMB 10%"]),
             s("kpi", "Revenue and margin missed plan", ["Revenue EUR 48.2m vs EUR 51.0m", "Margin 31.4%, down 2.1 pts", "Churn 4.1% vs 3.5%"]),
+            s("summary", "Freight and raw materials drove the decline", ["Gross margin down 2.1 pts", "Freight +0.9 pts", "Raw materials +1.2 pts"]),
+            s("bars", "Operating profit fell EUR 10.0m", ["Volume –EUR 5m", "Price EUR –3m", "Costs EUR –2m"]),
+            s("summary", "Operating profit fell EUR 4m, driven by volume", ["Volume -5m", "Price +2m", "Mix -1m"]),     # mixed signs net
+            s("kpi", "Margin and churn moved the wrong way", ["Gross margin down 2.1 pts", "Churn up 0.6 pts", "NPS down 3 pts"]),  # not a bridge
+            # a KPI line with its own cause ("driven by", "due to") is a separate movement, not a part
+            s("kpi", "Three KPIs moved", ["Gross margin down 2.1 pts due to freight", "Churn up 0.6 pts driven by the price rise", "NPS down 3 pts"]),
+            s("summary", "Margin decline explained", ["Gross margin down 2.1 pts", "Freight added 0.9 points to the decline",
+                                                      "Raw materials added 1.2 points to the decline"]),
+            s("summary", "EBIT fell EUR 10.0m", ["Lower volume reduced EBIT by EUR 5.0m", "Price cut EBIT by EUR 3.0m", "Costs reduced EBIT by EUR 2.0m"]),
+            s("kpi", "KPIs year on year", ["Margin -2.1 pts YoY", "Churn +0.6 pts YoY", "NPS -3 pts YoY"]),
+            s("summary", "Freight and raw materials drove the decline", ["Gross margin down 2.1 pts", "Freight +0.94 pts", "Raw materials +1.18 pts"]),
             # seen live: a body line restating the total is not a third part
             s("driver", "Freight and raw materials explain the full 2.1-point gross margin decline",
               ["Freight added 0.9 pts", "Raw materials added 1.2 pts", "Together they explain the full 2.1-point decline"]),
@@ -187,6 +210,15 @@ class WithLLM(Base):
             self.assertTrue(_sum_problem(sl), sl)
         for sl in must_pass:
             self.assertEqual(_sum_problem(sl), "", sl)
+
+    def test_summary_keeps_criticism_drops_praise(self):  # quality-check suggestion on S-01
+        from studio.services import _praises
+        self.assertFalse(_praises("Evidence is thin on slides 3 and 4."))
+        self.assertFalse(_praises("Evidence is not strong enough for a board decision."))
+        self.assertFalse(_praises("Evidence is thin as well."))
+        self.assertTrue(_praises("Decision clarity is high, with no ambiguity about the ask."))
+        self.assertTrue(_praises("Decision clarity is strong, though the timeline could be tighter."))
+        self.assertTrue(_praises("Evidence is well sourced."))
 
     def test_advise_and_sharpen(self):
         a = json.loads(self.post("/api/advise", {"message": "why did turnover increase"})[2])
@@ -415,6 +447,50 @@ class Decks(Base):
                 self.assertIn("group's text was carried over", warn)
                 self.assertIn("SmartArt diagram's text was carried over", warn)
 
+    def test_deck_saved_by_powerpoint(self):  # round 4: a deck built and saved by PowerPoint itself
+        raw = (ROOT / "tests" / "fixtures" / "powerpoint_northwind.pptx").read_bytes()
+        from studio.slides import deck as deck_ops
+        texts = {t["index"]: t for t in deck_ops.slide_texts(raw, set(range(1, 7)), whole_slide=True)}
+        self.assertIn("34.5", texts[3]["data"][0])                              # S-02: chart values reach the model
+        self.assertIn("EUR 71.2m", texts[4]["data"][0])                         # ... and table cells
+        self.assertTrue(texts[1]["cover"])
+        # S-03: a headline written from the slide's sentence does not reappear as a point under it
+        from studio import catalog
+        from studio import slides as slide_engine
+        tpl = catalog.template("corporate")
+        out, _rep = deck_ops.retemplate(raw, {5}, {5: {"title": "Lead time from order to shelf averages 19 days", "body": None}},
+                                        tpl, {"template_name": tpl["name"], "date": "x", "title": "x"}, slide_engine.template_path(tpl))
+        lines = [p for sh in deck_ops.open_deck(out).slides[0].shapes for p in deck_ops.box_text(sh)]
+        self.assertEqual(sum("averages 19 days" in p for p in lines), 1, lines)
+        self.assertIn("On shelf after 12 days", lines)
+        st, _, body = self.post("/api/deck/upload", raw=raw, headers={"X-Filename": "Northwind.pptx"})
+        d = json.loads(body)
+        facts = ["184.6m", "6.2%", "31%", "38.9%", "1.4 pts", "0.8 pts", "0.6 pts", "74", "65", "2 days", "5 days",
+                 "12 days", "19 days", "3 stores", "11%", "Utrecht", "Executive Committee", "October 2026"]
+        for actions in ({"retemplate": True}, {"headlines": True, "simplify": True, "retemplate": True}, {"headlines": True, "simplify": True}):
+            st, _, body = self.post("/api/deck/transform", {"deck_id": d["deck_id"], "selected": [1, 2, 3, 4, 5, 6],
+                                    "actions": actions, "brief": BRIEF})
+            self.assertEqual(st, 200, body)
+            r = json.loads(body)
+            prs = self._open(r["file_id"])
+            text = " ".join(p for s in prs.slides for sh in s.shapes for p in deck_ops.box_text(sh))
+            notes = " ".join(s.notes_slide.notes_text_frame.text for s in prs.slides)
+            if not actions.get("retemplate"):   # in place, SmartArt text stays in its own diagram part
+                text += " ".join(deck_ops.slide_texts(raw, {5}, whole_slide=True)[0]["body"])
+            self.assertEqual([f for f in facts if f not in text + notes], [], actions)
+            for phrase in ("Lead with sales growth", "Online keeps gaining share", "roll-out in Q1 2027"):
+                self.assertIn(phrase, notes, actions)                           # speaker notes survive
+            shapes = lambda i: prs.slides[i].shapes  # noqa: E731
+            self.assertTrue(any(getattr(sh, "has_chart", False) and sh.has_chart for sh in shapes(2)), actions)
+            self.assertTrue(any(getattr(sh, "has_table", False) and sh.has_table for sh in shapes(3)), actions)
+            self.assertTrue(any(sh.shape_type == 13 for sh in shapes(5)), actions)  # the picture
+            if actions.get("retemplate"):
+                for s in prs.slides:                                            # S-03: headline never repeated below
+                    head = s.shapes.title.text_frame.text.strip().rstrip(".").lower() if s.shapes.title is not None else ""
+                    others = [p.rstrip(".").lower() for sh in s.shapes if sh.shape_id != getattr(s.shapes.title, "shape_id", None)
+                              for p in deck_ops.box_text(sh)]
+                    self.assertNotIn(head, others, actions)
+
     def test_in_place_never_copies_other_boxes(self):  # N-01 in place: a KPI tile as the "main text"
         from studio.checks import rewrite_problem
         original = {"title": "Key metrics", "body": ["94%", "On-time delivery"],
@@ -457,6 +533,9 @@ class Decks(Base):
         self.assertTrue(r["readiness"]["capped"])
         self.assertEqual(r["readiness"]["score"], 2.5)
         self.assertGreater(r["readiness"]["raw_score"], 2.5)
+        # S-01: the summary leads with the verdict and keeps none of the model's "Ready."
+        self.assertTrue(r["summary"].startswith("Not board-ready: critical check PRES-08 fails"), r["summary"])
+        self.assertNotRegex(r["summary"].split(").", 1)[1], r"(?i)\bready\b")
         # N-04: the ask is on slide 1 but the deck closes on a roadmap: still FAIL, and the wording says so
         opener = dict(slides[0], body=["Approve a 3% mid-market price increase from January", "Freight +0.9 pts"])
         r = json.loads(self.post("/api/board-assessment", {"brief": BRIEF, "slides": [opener, slides[1]], "context": {}})[2])

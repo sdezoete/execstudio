@@ -137,6 +137,11 @@ _ROW_TOLERANCE = 304800  # 1/3 inch in EMU: boxes whose tops are this close sit 
 _PAGE_NUMBER = re.compile(r"^\s*\d{1,3}\s*(/|of)\s*\d{1,3}\s*$", re.I)
 
 
+def _squash(text):
+    """Letters and digits only, lower case: "Lead time averages 19 days." == "lead time averages 19 days"."""
+    return re.sub(r"[\W_]+", "", (text or "").lower())
+
+
 def _is_badge(text):
     """Number badges, bullets and step markers ("1", "02", "•", "A") are decoration, not content."""
     t = text.strip()
@@ -305,6 +310,26 @@ def replace_paragraphs(tf, lines):
         tx.append(p)
 
 
+def slide_data(slide):
+    """The values in a slide's charts and tables, as short lines of text, so a headline can be written
+    from them (test report S-02: a chart slide kept its topic title "Sales by channel")."""
+    out = []
+    _pics, charts, tables, _other = _visuals(slide)
+    for shp in charts:
+        try:
+            ch = _read_chart(shp)
+        except Exception:  # noqa: BLE001  (an unusual chart: no data line, never a failed transform)
+            continue
+        line = "Chart%s: categories %s" % (" '%s'" % ch["title"] if ch["title"] else "", ", ".join(ch["categories"]))
+        for s in ch["series"]:
+            line += "; %s: %s" % (s["name"], ", ".join("%g" % v for v in s["values"]))
+        out.append(line[:600])
+    for shp in tables:
+        rows = [" | ".join(c.text.strip() for c in row.cells) for row in list(shp.table.rows)[:12]]
+        out.append(("Table: " + "; ".join(rows))[:600])
+    return out
+
+
 def slide_texts(data, indices, whole_slide=False):
     """Title and body text per slide, for the LLM. whole_slide=True (re-templating, where the slide is
     rebuilt from this text) makes body every text box on the slide, so a simplified body replaces all of
@@ -318,11 +343,14 @@ def slide_texts(data, indices, whole_slide=False):
         title = find_title(slide)
         head = title.text_frame.text.strip() if title else ""
         if whole_slide:
-            out.append({"index": i, "title": head, "body": slide_content(slide, title), "other_text": []})
+            item = {"index": i, "title": head, "body": slide_content(slide, title), "other_text": []}
         else:
             body = find_body(slide, title)
-            out.append({"index": i, "title": head, "body": _text_of(body) if body else [],
-                        "other_text": other_text(slide, title, body)[0]})
+            item = {"index": i, "title": head, "body": _text_of(body) if body else [],
+                    "other_text": other_text(slide, title, body)[0]}
+        item["data"] = slide_data(slide)        # read-only chart and table values
+        item["cover"] = _is_cover(slide)
+        out.append(item)
     return out
 
 
@@ -449,6 +477,8 @@ def retemplate(data, indices, changes, tpl, meta, template_path, template_bytes=
         # otherwise carry every text box: KPI tiles and callouts live in boxes of their own
         original = slide_content(s, title)
         lines = list(ch["body"]) if ch.get("body") else original
+        # a sentence the new headline was written from must not repeat as a point under it (S-03)
+        lines = [x for x in lines if _squash(x) != _squash(head)]
         simplified = bool(ch.get("body")) and [x.strip() for x in ch["body"]] != original
         small_print = [x for x in small_by_slide[i] if x not in repeated]
         pics, charts, tables, other = _visuals(s)

@@ -112,8 +112,20 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/export/briefing":
             return self._guard(lambda: self._file(*self.studio.export_briefing(self._read_json()),
                                                   ctype="text/markdown; charset=utf-8"))
-        self.close_connection = True  # the unread request body must not leak into the next request
+        self._discard_body()
         return self._error(HTTPStatus.NOT_FOUND, "Unknown API endpoint.")
+
+    def _discard_body(self):
+        """Before answering a request whose body we won't use: read a small body (closing a socket with
+        unread data makes Windows send a reset, which can reach the client before the answer, as
+        WinError 10053), and close the connection so a larger one can't leak into the next request."""
+        try:
+            n = int((getattr(self, "headers", None) or {}).get("Content-Length") or 0)
+            if 0 < n <= 1024 * 1024:
+                self.rfile.read(n)
+        except (OSError, ValueError):
+            pass
+        self.close_connection = True
 
     # ------------------------------------------------------------ handlers
     def _extract(self):
@@ -176,6 +188,7 @@ class Handler(BaseHTTPRequestHandler):
         if code == HTTPStatus.NOT_IMPLEMENTED and self.command:  # no do_<METHOD>: the method is the problem
             code, message, extra = (HTTPStatus.METHOD_NOT_ALLOWED,
                                     "Method %s is not allowed here. Use GET or POST." % self.command, {"Allow": "GET, HEAD, POST"})
+            self._discard_body()
         self.close_connection = True
         try:
             self._send(code, json.dumps({"error": message or HTTPStatus(code).phrase}).encode("utf-8"),

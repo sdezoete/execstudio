@@ -96,7 +96,7 @@ def run(brief, slides):
 # growth rates are not additive (segments at +12% and -3% can make +4% overall), and actual / plan /
 # variance figures are not parts of a total (N-02: "48.2m vs plan 51.0m, a 2.8m miss" is not
 # 48.2 + 51 + 2.8), so both are left alone.
-_N = r"[+\-−]?\d[\d,]*(?:\.\d+)?"
+_N = r"[+\-−–]?\d[\d,]*(?:\.\d+)?"  # "–5" (en dash) is a minus too
 _UNIT = r"(pts?|points?|percentage points?|pp|ppt|m|mn|million|bn|billion|k|thousand|%)"
 _QTY = re.compile(r"(" + _N + r")\s*-?\s*" + _UNIT + r"(?![A-Za-z])", re.I)
 _UNITS = {"pt": "pts", "pts": "pts", "point": "pts", "points": "pts", "percentage point": "pts", "percentage points": "pts",
@@ -106,14 +106,29 @@ _EQUATION = re.compile(r"(" + _N + r")(?:\s*-?\s*" + _UNIT + r")?((?:\s*(?:\+|pl
                        r"\s*(?:=|equals?|makes?|gives?|sums? to|adds? up to|totals?|come to|comes to)\s*(?:the\s+|a\s+)?(" + _N + r")", re.I)
 _TOTAL = re.compile(r"\b(total|overall|in all|altogether|combined)\b", re.I)
 _PHANTOM = re.compile(r"\b(unexplained|not specified|unspecified|unaccounted|remaining (gap|decline|difference)|other factors)\b", re.I)
-_PARTIAL = re.compile(r"\b(other|others|rest|remainder|remaining|mainly|largely|main|primarily|partly|partially|including|such as)\b", re.I)
+_PARTIAL = re.compile(r"\b(other|others|rest|remainder|remaining|mainly|largely|main|key|among|primarily|partly|partially|including|such as)\b", re.I)
 _COMPARISON = re.compile(r"\b(vs\.?|versus|against|plan|target|budget|forecast|prior year|last year|actual)\b", re.I)
 _SHARE = re.compile(r"\b(share|shares|mix|split|breakdown|portion|composition|of (total|revenue|sales|spend|volume|the total))\b", re.I)
-_GROWTH = re.compile(r"[+\-−]\s*\d|\b(up|down|growth|grew|rose|fell|increase\w*|decrease\w*|decline\w*|yoy|qoq)\b", re.I)
+_GROWTH = re.compile(r"[+\-−–]\s*\d|\b(up|down|growth|grew|rose|fell|increase\w*|decrease\w*|decline\w*|yoy|qoq)\b", re.I)
+
+
+_CHANGE = re.compile(r"\b(down|fell|fall|falls|declin\w*|drop\w*|decreas\w*|lower|up|rose|rise|rises|increas\w*|grew|"
+                     r"grow\w*|improv\w*|eroded|erosion|lost|gained|net change|changed|yoy|qoq|year (?:over|on) year)\b", re.I)
+_BRIDGE = re.compile(r"\b(contribut\w*|added|adds|drove|driven|due to|impact\w*|effect|explain\w*|account\w* for|"
+                     r"bridge|drivers?|because|from)\b", re.I)
+# a part line may name the change it feeds ("Freight added 0.9 points to the decline", "Lower volume reduced
+# EBIT by EUR 5.0m"). "driven by" and "due to" are deliberately absent: they explain a line's OWN movement
+# ("Churn up 0.6 pts driven by the price rise"), and such a line is a separate KPI, not a part
+_CONTRIBUTES = re.compile(r"\b(contribut\w*|added|adds|drove|accounts? for|accounted for|"
+                          r"reduced \w+ by|cut \w+ by|lifted \w+ by|raised \w+ by)\b", re.I)
+
+
+def _signed(s):
+    return float(s.replace("−", "-").replace("–", "-").replace(",", ""))
 
 
 def _num(s):
-    return abs(float(s.replace("−", "-").replace(",", "")))
+    return abs(_signed(s))
 
 
 def _qty(text, unit=None):
@@ -122,16 +137,48 @@ def _qty(text, unit=None):
     return [q for q in out if unit is None or q[1] == unit]
 
 
+def _parts(text, unit):
+    """[(signed value, has explicit sign)] for the quantities in `unit`."""
+    return [(_signed(n), n[0] in "+-−–") for n, u in _QTY.findall(text or "") if _UNITS[u.lower()] == unit]
+
+
 def _close(a, b):
     return abs(a - b) <= max(0.051, 0.005 * max(a, b))  # rounding to one decimal, or 0.5%
+
+
+def _find_total(slide, lines, text):
+    """(value, unit, line) for the figure the parts should make, or None:
+    - a labelled total ("Total EUR 48.2m");
+    - a stated change ("Gross margin down 2.1 pts", "Operating profit fell EUR 12.0m") on a slide that
+      reads as a bridge: a driver slide, contributor wording ("contributed", "driven by"), or signed parts;
+    - on a driver slide, the headline's figure."""
+    for line in lines:
+        if _TOTAL.search(line) and not _COMPARISON.search(line):
+            q = [x for x in _qty(line) if x[1] != "%"]
+            if q:
+                return max(q) + (line,)
+    changes = [(v, u, line) for line in lines if _CHANGE.search(line) and not _COMPARISON.search(line)
+               for v, u in _qty(line) if u != "%"]
+    if changes:
+        v, u, line = max(changes)
+        signed = any(sign for b in slide["body"] if b != line and not (_CHANGE.search(b) and not _CONTRIBUTES.search(b))
+                     for _x, sign in _parts(b, u))
+        if slide.get("kind") == "driver" or _BRIDGE.search(text) or _CONTRIBUTES.search(text) or signed:
+            return v, u, line
+    if slide.get("kind") == "driver":
+        q = [x for x in _qty(slide["headline"]) if x[1] != "%"]
+        if q:
+            return max(q) + (slide["headline"],)
+    return None
 
 
 def _sum_problem(slide):
     """Parts that do not make their total. Three cases:
     - a written sum that is wrong ("0.9 plus 1.6 equals the 2.1-point decline");
-    - parts against a total that is labelled ("Total EUR 48.2m"), or on a driver slide the headline's
-      figure: parts above the total, parts below it with nothing said about the rest, or a "remaining
-      gap" that cannot exist because the parts already make the total (D-06);
+    - parts against their total (see _find_total): parts above it, parts below it with nothing said
+      about the rest, or a "remaining gap" that cannot exist because the parts already make it (D-06).
+      Parts are the contributor lines ("Freight +0.9 pts", "contributed 1.6 points"), never lines that
+      state a change of their own: a list of separate KPI movements is not a bridge;
     - shares of a whole that add up to more than 100%."""
     lines = [slide["headline"]] + list(slide["body"])
     text = " ".join(lines + [slide.get("notes") or ""])
@@ -144,27 +191,21 @@ def _sum_problem(slide):
             if not _close(sum(left), right):
                 return "%s makes %g, not %g" % (" + ".join("%g" % x for x in left), sum(left), right)
 
-    total = None
-    for line in lines:
-        if _TOTAL.search(line) and not _COMPARISON.search(line):
-            q = [x for x in _qty(line) if x[1] != "%"]
-            if q:
-                total, total_line = max(q), line
-                break
-    if total is None and slide.get("kind") == "driver":
-        q = [x for x in _qty(slide["headline"]) if x[1] != "%"]
-        if q:
-            total, total_line = max(q), slide["headline"]
+    total = _find_total(slide, lines, text)
     if total is not None:
-        value, unit = total
+        value, unit, total_line = total
         # a line carrying the total's own value restates it ("together they explain the full 2.1-point
         # decline"); it is not one more part
-        parts = [v for b in slide["body"] if b != total_line and not _COMPARISON.search(b) and not _EQUATION.search(b)
-                 and not _TOTAL.search(b) and not any(_close(x, value) for x, _u in _qty(b, unit))
-                 for v, _u in _qty(b, unit)]
+        parts = [p for b in slide["body"] if b != total_line and not _COMPARISON.search(b) and not _EQUATION.search(b)
+                 and not _TOTAL.search(b) and not (_CHANGE.search(b) and not _CONTRIBUTES.search(b))
+                 and not any(_close(x, value) for x, _u in _qty(b, unit))
+                 for p in _parts(b, unit)]
         if len(parts) >= 2:
-            s = round(sum(parts), 4)
-            shown = " + ".join("%g" % p for p in parts) + " = %g %s" % (s, unit)
+            signs = {v > 0 for v, explicit in parts if explicit}
+            # mixed signs (volume -5, price +2) net off; otherwise every part pushes the same way, whatever
+            # sign the author wrote ("+0.9 pts of pressure" on a margin decline)
+            s = round(abs(sum(v for v, _e in parts)) if len(signs) > 1 else sum(abs(v) for v, _e in parts), 4)
+            shown = " ".join(("%+g" % v) if len(signs) > 1 else ("+ %g" % abs(v)) for v, _e in parts).lstrip("+ ") + " = %g %s" % (s, unit)
             if s > value and not _close(s, value):
                 return "the parts (%s) are more than the total of %g %s" % (shown, value, unit)
             if _close(s, value) and _PHANTOM.search(text):

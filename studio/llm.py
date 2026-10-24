@@ -91,8 +91,11 @@ class LLMClient:
                 if e.code not in self._RETRYABLE_HTTP or attempt == attempts - 1:
                     raise
                 time.sleep(1.5)
-            except Exception:
-                if attempt == attempts - 1:
+            except Exception as e:
+                # refused = nothing is listening: one retry covers a restart, more only delays the
+                # fallback (on Windows each refusal takes ~2 s, so five attempts held users ~17 s)
+                refused = isinstance(getattr(e, "reason", e), ConnectionRefusedError)
+                if attempt == attempts - 1 or (refused and attempt >= 1):
                     raise
                 time.sleep(1.5)
 

@@ -121,6 +121,10 @@ def transform(slides, actions, brief, feedback=None):
         + "\n".join("- " + r for r in rules) + "\n"
         "- other_text is the slide's other text boxes. It is read-only context: use it to understand the "
         "slide, but do not copy it into body.\n"
+        "- data holds the values of the slide's charts and tables (read-only). When a slide has little or no "
+        "body text, write its title from data: state what the values show, using the numbers exactly as "
+        "given (for example 'Online sales rose to EUR 34.5m in Q2'). Never compute new figures.\n"
+        "- cover: true marks a title slide; keep its title as it is.\n"
         "- Never add facts or numbers that are not on the slide. Keep the slide's language.\n"
         "- Never write placeholders such as 'Evidence needed', 'TBD' or '[Add content]'. If a slide has "
         "too little text to improve, keep its title and body as they are.\n"
@@ -257,7 +261,9 @@ def board_assessment(brief, slides, ctx):
         "the minimum change needed to reach PASS in \"action\" (leave action empty for PASS/NOT APPLICABLE).\n\n"
         "SEPARATELY, score BOARD READINESS 1 (poor) to 5 (excellent) for each dimension below, with a one-sentence "
         "comment explaining the score:\n" + dims_text + "\n\n"
-        "Then write a 2-3 sentence overall summary covering both the compliance outcome and board readiness.\n\n"
+        "Then write a 2-3 sentence overall summary covering both the compliance outcome and board readiness. "
+        "A deck that FAILS any critical requirement is not board-ready, however good the scores: say so first, "
+        "and never call it ready.\n\n"
         'Return JSON only: {"compliance": [{"id": string, "result": string, "evidence": string, "action": string}], '
         '"board_readiness": {"<dimension id>": {"score": number, "comment": string}}, "summary": string}'
     )

@@ -168,6 +168,10 @@ def rewrite_problem(original, rewrite):
         if copied:
             return "copied text from the slide's other boxes into the main text (%s); it is already on the slide" % "; ".join(copied[:3])
     before = [original.get("title") or ""] + list(original.get("body") or [])
+    on_slide = numbers(" ".join(before + list(original.get("other_text") or []) + list(original.get("data") or [])))
+    added = sorted(numbers(" ".join([rewrite.get("title") or ""] + list(rewrite.get("body") or []))) - on_slide)
+    if added:
+        return "added figures that are not on the slide (%s); use only the slide's own numbers" % ", ".join(added[:5])
     if rewrite.get("title"):
         wrong_way = direction_problem(before + list(original.get("other_text") or []), rewrite["title"])
         if wrong_way:

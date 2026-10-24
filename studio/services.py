@@ -179,6 +179,7 @@ class Studio:
         _enforce_decision_slide(result, slides, b["decision"])
         result["compliance"].insert(0, _sub01(ctx))
         result["readiness"] = _readiness(result)
+        result["summary"] = _settle_summary(result)
         result.update(meta)
         return result
 
@@ -369,6 +370,11 @@ class Studio:
             r["before"] = before.get(r["index"], "")
             r["after"] = (changes.get(r["index"]) or {}).get("title") or r["before"]
             r["warnings"] = (changes.get(r["index"]) or {}).get("warnings", []) + r["warnings"]
+            # say so when a headline asked for is still a topic label, rather than leave it silently (S-02)
+            src = next((t for t in texts if t["index"] == r["index"]), {})
+            if (actions["headlines"] and not src.get("cover") and r["after"] == r["before"] and r["before"]
+                    and headline_problem(r["before"]) and not any(w.startswith("Left unchanged") for w in r["warnings"])):
+                r["warnings"].append("Headline not rewritten: the slide gave no finding to state. Write one yourself.")
         fid = self.work.put(out, out_name)
         self.audit("deck_transform", b, slides=len(selected), source=meta_ai.get("source"), **actions)
         return dict(meta_ai, file_id=fid, filename=out_name, report=report,
@@ -524,6 +530,41 @@ def _readiness(result):
     capped = raw is not None and bool(critical) and raw > READINESS_CAP_ON_CRITICAL
     return {"score": READINESS_CAP_ON_CRITICAL if capped else raw, "raw_score": raw, "capped": capped,
             "board_ready": not critical, "critical_fails": critical}
+
+
+# any sentence about readiness: the verdict sentence now owns that topic
+_READY_CLAIM = re.compile(r"\b(ready|readiness|well prepared|strong on|strong overall)\b", re.I)
+# praise words; "well" only as "well sourced" / "well-structured", so "thin as well" is not praise
+_PRAISE = re.compile(r"\b(strong|clear|good|excellent|solid|effective|compelling|robust|high|well[- ]\w+ed)\b", re.I)
+_NEGATED = re.compile(r"\b(not|no|never|hardly|lacks?|lacking)\s+(?:\w+\s+)?$", re.I)
+
+
+def _praises(sentence):
+    """True when the sentence praises something: a praise word not negated just before it ("not strong")."""
+    return any(not _NEGATED.search(sentence[:m.start()]) for m in _PRAISE.finditer(sentence))
+
+
+def _settle_summary(result):
+    """The summary as the final word, written after the critical checks and the cap. The model writes its
+    summary before PRES-08 is enforced and the score capped, so it can call a failing deck "highly ready"
+    (test report S-01). When a critical check fails, the summary opens with that verdict, and model
+    sentences claiming readiness, or praising a dimension that was capped, are dropped."""
+    rd = result["readiness"]
+    summary = result.get("summary") or ""
+    if rd["board_ready"]:
+        return summary
+    failing = [c for c in result["compliance"] if c["id"] in rd["critical_fails"]]
+    capped_dims = [d["label"].lower() for d in result["board_readiness"] if d["score"] is not None and d["score"] <= 3]
+    # drop praise of a dimension that scored 3 or less, but keep criticism of it ("Evidence is thin"); a
+    # sentence that praises it in passing ("clear, though the timeline could be tighter") still goes
+    keep = [x for x in re.split(r"(?<=[.!?])\s+", summary) if x.strip() and not _READY_CLAIM.search(x)
+            and not (any(dim in x.lower() for dim in capped_dims) and _praises(x))]
+    verdict = "Not board-ready: critical check%s %s fail%s (%s)." % (
+        "s" if len(failing) > 1 else "", ", ".join(c["id"] for c in failing), "" if len(failing) > 1 else "s",
+        "; ".join(c["requirement"].rstrip(".") for c in failing))
+    if rd["capped"]:
+        verdict += " Readiness is capped at %g/5 until %s fixed." % (rd["score"], "they are" if len(failing) > 1 else "it is")
+    return " ".join([verdict] + keep)
 
 
 def _enforce_decision_slide(result, slides, decision):
