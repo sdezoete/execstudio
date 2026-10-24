@@ -104,10 +104,18 @@ _UNITS = {"pt": "pts", "pts": "pts", "point": "pts", "points": "pts", "percentag
           "k": "k", "thousand": "k", "%": "%"}
 _EQUATION = re.compile(r"(" + _N + r")(?:\s*-?\s*" + _UNIT + r")?((?:\s*(?:\+|plus)\s*" + _N + r"(?:\s*-?\s*" + _UNIT + r")?)+)"
                        r"\s*(?:=|equals?|makes?|gives?|sums? to|adds? up to|totals?|come to|comes to)\s*(?:the\s+|a\s+)?(" + _N + r")", re.I)
+# "Freight 0.9 and raw materials 1.6 points sum to the 2.1-point decline": two parts joined by "and", only
+# with an explicit sum verb ("and" alone joins all sorts of figures)
+_AND_SUM = re.compile(r"(" + _N + r")(?:\s*-?\s*" + _UNIT + r")?[^.;:\d]{0,40}?\band\b[^.;:\d]{0,40}?(" + _N + r")(?:\s*-?\s*" + _UNIT + r")?"
+                      r"[^.;:\d]{0,20}?\b(?:sum to|sums to|add up to|adds up to|make up|makes up|equal|equals|total|totals|come to|comes to)\s*"
+                      r"(?:the\s+|a\s+)?(" + _N + r")", re.I)
 _TOTAL = re.compile(r"\b(total|overall|in all|altogether|combined)\b", re.I)
 _PHANTOM = re.compile(r"\b(unexplained|not specified|unspecified|unaccounted|remaining (gap|decline|difference)|other factors)\b", re.I)
 _PARTIAL = re.compile(r"\b(other|others|rest|remainder|remaining|mainly|largely|main|key|among|primarily|partly|partially|including|such as)\b", re.I)
 _COMPARISON = re.compile(r"\b(vs\.?|versus|against|plan|target|budget|forecast|prior year|last year|actual)\b", re.I)
+# against a plan, target or budget: a variance, never a total of parts (N-02). Against the prior year it is
+# a change over time ("down 2.1 pts vs prior year") and can be a bridge's total
+_VS_PLAN = re.compile(r"\b(plan|target|budget|forecast|actual)\b", re.I)
 _SHARE = re.compile(r"\b(share|shares|mix|split|breakdown|portion|composition|of (total|revenue|sales|spend|volume|the total))\b", re.I)
 _GROWTH = re.compile(r"[+\-−–]\s*\d|\b(up|down|growth|grew|rose|fell|increase\w*|decrease\w*|decline\w*|yoy|qoq)\b", re.I)
 
@@ -119,8 +127,22 @@ _BRIDGE = re.compile(r"\b(contribut\w*|added|adds|drove|driven|due to|impact\w*|
 # a part line may name the change it feeds ("Freight added 0.9 points to the decline", "Lower volume reduced
 # EBIT by EUR 5.0m"). "driven by" and "due to" are deliberately absent: they explain a line's OWN movement
 # ("Churn up 0.6 pts driven by the price rise"), and such a line is a separate KPI, not a part
-_CONTRIBUTES = re.compile(r"\b(contribut\w*|added|adds|drove|accounts? for|accounted for|"
-                          r"reduced \w+ by|cut \w+ by|lifted \w+ by|raised \w+ by)\b", re.I)
+_CONTRIBUTES = re.compile(r"\b(contribut\w*|added|adds|drove|accounts? for|accounted for)\b", re.I)
+_ACTS_ON = re.compile(r"\b(?:reduced|cut|lifted|raised|lowered|increased)\s+(\w+)\s+by\b", re.I)
+
+
+def _contributes(line, total_line):
+    """True when `line` names its share of the total: "contributed 0.9 points", or "reduced EBIT by EUR 5.0m"
+    where EBIT is what the total line is about. "We cut costs by EUR 1.5m" under "Revenue fell EUR 4.0m" is
+    an action on something else, not a part of the revenue fall (test report round 5)."""
+    if _CONTRIBUTES.search(line):
+        return True
+    return any(m.group(1).lower() in (total_line or "").lower() for m in _ACTS_ON.finditer(line))
+
+
+def _acts_on_other(line, total_line):
+    """"We cut costs by EUR 1.5m" under a revenue total: an action on something else, never a part."""
+    return any(m.group(1).lower() not in (total_line or "").lower() for m in _ACTS_ON.finditer(line))
 
 
 def _signed(s):
@@ -157,13 +179,14 @@ def _find_total(slide, lines, text):
             q = [x for x in _qty(line) if x[1] != "%"]
             if q:
                 return max(q) + (line,)
-    changes = [(v, u, line) for line in lines if _CHANGE.search(line) and not _COMPARISON.search(line)
+    changes = [(v, u, line) for line in lines if _CHANGE.search(line) and not _VS_PLAN.search(line)
                for v, u in _qty(line) if u != "%"]
     if changes:
         v, u, line = max(changes)
-        signed = any(sign for b in slide["body"] if b != line and not (_CHANGE.search(b) and not _CONTRIBUTES.search(b))
+        signed = any(sign for b in slide["body"] if b != line and not (_CHANGE.search(b) and not _contributes(b, line))
                      for _x, sign in _parts(b, u))
-        if slide.get("kind") == "driver" or _BRIDGE.search(text) or _CONTRIBUTES.search(text) or signed:
+        if (slide.get("kind") == "driver" or _BRIDGE.search(text) or signed
+                or any(_contributes(b, line) for b in slide["body"] if b != line)):
             return v, u, line
     if slide.get("kind") == "driver":
         q = [x for x in _qty(slide["headline"]) if x[1] != "%"]
@@ -190,6 +213,11 @@ def _sum_problem(slide):
             right = _num(m.group(5))
             if not _close(sum(left), right):
                 return "%s makes %g, not %g" % (" + ".join("%g" % x for x in left), sum(left), right)
+        m = _AND_SUM.search(line)
+        if m:
+            left, right = [_num(m.group(1)), _num(m.group(3))], _num(m.group(5))
+            if not _close(sum(left), right):
+                return "%g + %g makes %g, not %g" % (left[0], left[1], sum(left), right)
 
     total = _find_total(slide, lines, text)
     if total is not None:
@@ -197,8 +225,8 @@ def _sum_problem(slide):
         # a line carrying the total's own value restates it ("together they explain the full 2.1-point
         # decline"); it is not one more part
         parts = [p for b in slide["body"] if b != total_line and not _COMPARISON.search(b) and not _EQUATION.search(b)
-                 and not _TOTAL.search(b) and not (_CHANGE.search(b) and not _CONTRIBUTES.search(b))
-                 and not any(_close(x, value) for x, _u in _qty(b, unit))
+                 and not _TOTAL.search(b) and not (_CHANGE.search(b) and not _contributes(b, total_line))
+                 and not _acts_on_other(b, total_line) and not any(_close(x, value) for x, _u in _qty(b, unit))
                  for p in _parts(b, unit)]
         if len(parts) >= 2:
             signs = {v > 0 for v, explicit in parts if explicit}

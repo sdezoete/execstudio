@@ -564,6 +564,8 @@ def _settle_summary(result):
         "; ".join(c["requirement"].rstrip(".") for c in failing))
     if rd["capped"]:
         verdict += " Readiness is capped at %g/5 until %s fixed." % (rd["score"], "they are" if len(failing) > 1 else "it is")
+    # the page shows the verdict in its banner, so it also gets the two halves (no verdict twice in a row)
+    result["verdict"], result["summary_detail"] = verdict, " ".join(keep)
     return " ".join([verdict] + keep)
 
 

@@ -181,6 +181,10 @@ class WithLLM(Base):
             s("summary", "EBIT fell EUR 12.0m", ["Lower volume reduced EBIT by EUR 5.0m", "Price cut EBIT by EUR 3.0m", "Costs reduced EBIT by EUR 2.0m"]),
             s("summary", "Freight and materials explain the margin move", ["Gross margin 31.4%, -2.1 pts YoY", "Freight contributed 0.9 pts",
                                                                            "Raw materials contributed 1.6 pts"]),
+            # round 5: a one-line "and" sum, and a total "vs prior year"
+            s("driver", "Freight and raw materials drove the decline", ["Freight 0.9 and raw materials 1.6 points sum to the 2.1-point decline"]),
+            s("summary", "Margin decline explained", ["Gross margin down 2.1 pts vs prior year", "Freight contributed 0.9 pts", "Raw materials contributed 1.6 pts"]),
+            s("summary", "EBIT fell EUR 12.0m", ["Lower volume reduced EBIT by EUR 5.0m", "Price -3m", "Costs -2m"]),
         ]
         must_pass = [
             s("driver", "Freight and raw materials explain the full 2.1-point decline",
@@ -201,6 +205,14 @@ class WithLLM(Base):
                                                       "Raw materials added 1.2 points to the decline"]),
             s("summary", "EBIT fell EUR 10.0m", ["Lower volume reduced EBIT by EUR 5.0m", "Price cut EBIT by EUR 3.0m", "Costs reduced EBIT by EUR 2.0m"]),
             s("kpi", "KPIs year on year", ["Margin -2.1 pts YoY", "Churn +0.6 pts YoY", "NPS -3 pts YoY"]),
+            # round 5: actions on something else are not parts of the total
+            s("summary", "Q3 revenue update", ["Revenue fell EUR 4.0m", "We cut costs by EUR 1.5m", "We raised prices, adding EUR 0.5m"]),
+            s("summary", "Q3 revenue update", ["Revenue fell EUR 4.0m", "We cut costs by EUR 1.5m", "We raised prices by EUR 0.5m"]),
+            s("summary", "Q3 revenue update", ["Revenue fell EUR 4.0m, driven by volume", "We cut costs by EUR 1.5m", "We raised prices by EUR 0.5m"]),
+            s("summary", "EBIT fell EUR 10.0m", ["Lower volume reduced EBIT by EUR 5.0m", "Price cut EBIT by EUR 3.0m", "Costs reduced EBIT by EUR 2.0m"]),
+            s("driver", "Freight and raw materials drove the decline", ["Freight 0.9 and raw materials 1.2 points sum to the 2.1-point decline"]),
+            s("summary", "Margin decline explained", ["Gross margin down 2.1 pts vs prior year", "Freight contributed 0.9 pts", "Raw materials contributed 1.2 pts"]),
+            s("driver", "Revenue down EUR 2.8m vs plan", ["Revenue EUR 48.2m vs plan EUR 51.0m", "Gap of EUR 2.8m (-5.5%)", "Plan was EUR 51m"]),
             s("summary", "Freight and raw materials drove the decline", ["Gross margin down 2.1 pts", "Freight +0.94 pts", "Raw materials +1.18 pts"]),
             # seen live: a body line restating the total is not a third part
             s("driver", "Freight and raw materials explain the full 2.1-point gross margin decline",
@@ -536,6 +548,8 @@ class Decks(Base):
         # S-01: the summary leads with the verdict and keeps none of the model's "Ready."
         self.assertTrue(r["summary"].startswith("Not board-ready: critical check PRES-08 fails"), r["summary"])
         self.assertNotRegex(r["summary"].split(").", 1)[1], r"(?i)\bready\b")
+        self.assertEqual(r["summary"], (r["verdict"] + " " + r["summary_detail"]).strip())   # the page shows the verdict once
+        self.assertNotIn("Not board-ready", r["summary_detail"])
         # N-04: the ask is on slide 1 but the deck closes on a roadmap: still FAIL, and the wording says so
         opener = dict(slides[0], body=["Approve a 3% mid-market price increase from January", "Freight +0.9 pts"])
         r = json.loads(self.post("/api/board-assessment", {"brief": BRIEF, "slides": [opener, slides[1]], "context": {}})[2])
