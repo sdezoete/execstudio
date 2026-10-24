@@ -174,6 +174,7 @@
     try {
       var h = await Api.get("/api/health");
       state.health = h;
+      if (h.version) $("#appVersion").textContent = h.version;  // the server's build, never a stale label
       var on = h.llm.enabled && h.llm.reachable;
       if (h.pdf) { $("#files").setAttribute("accept", ".pptx,.docx,.xlsx,.pdf,.csv,.txt,.md"); $("#fileTypes").textContent = ".pptx .docx .xlsx .pdf .csv .txt .md"; }
       var eng = h.pptx || {};
@@ -310,8 +311,12 @@
       if (!busy(btn, true, "…")) return;
       try {
         var r = await Api.post("/api/sharpen", { headline: slides[i].headline, body: slides[i].body, brief: brief() });
-        if (r.headline && r.headline !== slides[i].headline) { slides[i].headline = r.headline; toast(r.source === "llm" ? "Headline rewritten." : "AI unavailable: headline tidied with built-in rules."); }
-        else toast("That headline already reads as an action title.");
+        var changed = r.headline && r.headline !== slides[i].headline;
+        if (changed) slides[i].headline = r.headline;
+        if (changed && r.source === "llm") toast("Headline rewritten.");
+        else if (changed) toast("AI unavailable: headline tidied with built-in rules." + (r.meets_rules ? "" : " It still needs a finding; edit it or try again."), !r.meets_rules);
+        else if (r.meets_rules) toast("That headline already reads as an action title.");
+        else toast("Couldn't rewrite this headline" + (r.source === "llm" ? "" : " (AI unavailable)") + ". Try again, or write the finding yourself.", true);
       } catch (err) { toast(err.message, true); }
       busy(btn, false);
     }
@@ -587,8 +592,7 @@
     cnt.textContent = fails ? fails + " fail" + (fails > 1 ? "s" : "") : "checked";
     cnt.className = "count" + (fails ? "" : " ok");
 
-    var scored = r.board_readiness.filter(function (d) { return d.score != null; });
-    var avg = scored.length ? scored.reduce(function (s, d) { return s + d.score; }, 0) / scored.length : null;
+    var rd = r.readiness || {}, avg = rd.score != null ? rd.score : null;
 
     var cats = [];
     r.compliance.forEach(function (c) { if (cats.indexOf(c.category) < 0) cats.push(c.category); });
@@ -599,7 +603,13 @@
     if (r.warning) html += '<p class="note" style="padding:6px 20px 0">' + esc(r.warning) + "</p>";
     if (r.summary) html += '<p class="note" style="padding:10px 20px 0;max-width:80ch">' + esc(r.summary) + "</p>";
 
-    html += '<div class="ready"><div class="eyebrow">Board readiness' + (avg != null ? " · " + avg.toFixed(1) + "/5" : "") + "</div>" +
+    if (rd.critical_fails && rd.critical_fails.length) {
+      html += '<div class="not-ready" role="status"><b>Not board-ready.</b> Critical check' + (rd.critical_fails.length > 1 ? "s " : " ") +
+        esc(rd.critical_fails.join(", ")) + (rd.critical_fails.length > 1 ? " fail" : " fails") + "; fix " +
+        (rd.critical_fails.length > 1 ? "them" : "it") + " before submitting." +
+        (rd.capped ? " The readiness score is capped at " + avg.toFixed(1) + "/5 until then (" + rd.raw_score.toFixed(1) + " on the dimensions alone)." : "") + "</div>";
+    }
+    html += '<div class="ready"><div class="eyebrow">Board readiness' + (avg != null ? " · " + avg.toFixed(1) + "/5" + (rd.capped ? " (capped)" : "") : "") + "</div>" +
       r.board_readiness.map(function (d) {
         var pct = d.score != null ? Math.round(d.score / 5 * 100) : 0;
         return '<div class="ready-row"><span class="rlabel">' + esc(d.label) + '</span><div class="rmeter"><i style="width:' + pct + '%"></i></div>' +
@@ -622,7 +632,11 @@
   }
   $("#panel-board").addEventListener("click", function (e) { if (e.target.id === "reboard") runBoardAssessment(); });
   $("#boardCtxForm").addEventListener("submit", function (e) { e.preventDefault(); runBoardAssessment(); });
-  $("#boardCtxForm").addEventListener("input", function () { $("#bc-meet").removeAttribute("aria-invalid"); });
+  $("#boardCtxForm").addEventListener("input", function () {
+    if ($("#bc-meet").getAttribute("aria-invalid") !== "true") return;
+    $("#bc-meet").removeAttribute("aria-invalid");
+    renderBoard();  // replaces the date error with the last result, or the empty state
+  });
 
   /* ------------------------------------------------------------------ tabs */
   function selectTab(name) {
@@ -746,7 +760,7 @@
     state.stages = ["todo", "todo", "todo", "todo", "todo", "todo"];
     syncTaskUi();
     $("#tplStatus").textContent = ""; updateTplVisibility();
-    renderFiles(); renderPipeline(); renderDeck(); renderXform(); selectTab("story"); save();
+    renderFiles(); renderPipeline(); renderDeck(); renderBoard(); renderXform(); selectTab("story"); save();
     $("#topic").focus();
   });
 
@@ -829,17 +843,21 @@
   }
   var SYN = {};  // SYNONYMS keyed and valued by stem, the form query words arrive in
   Object.keys(SYNONYMS).forEach(function (k) { SYN[stem(k)] = SYNONYMS[k].map(stem); });
+  /* A word found in the title or category counts double: "risks" puts the risk heat map first. */
   function repoScore(r, terms) {
-    var hay = words([r.title, r.question, r.category, LAYOUT[r.kind] || "", r.headline || "", (r.structure || []).join(" ")].join(" "));
+    var head = words([r.title, r.category].join(" "));
+    var rest = words([r.question, LAYOUT[r.kind] || "", r.headline || "", (r.structure || []).join(" ")].join(" "));
     return terms.reduce(function (n, t) {
       var alts = [t].concat(SYN[t] || []);
-      return n + (hay.some(function (w) { return alts.some(function (a) { return w === a || (a.length > 3 && w.indexOf(a) === 0); }); }) ? 1 : 0);
+      var hit = function (w) { return alts.some(function (a) { return w === a || (a.length > 3 && w.indexOf(a) === 0); }); };
+      return n + (head.some(hit) ? 2 : rest.some(hit) ? 1 : 0);
     }, 0);
   }
   function renderRepo() {
     var cats = ["All"].concat(repo.map(function (r) { return r.category; }).filter(function (c, i, a) { return a.indexOf(c) === i; }));
-    var terms = words($("#repoSearch").value);
-    var list = repo.filter(function (r) { return repoCat === "All" || r.category === repoCat; })
+    var raw = $("#repoSearch").value.trim(), terms = words(raw);
+    var tooCommon = raw && !terms.length;  // only words like "the" or "why": they would match everything
+    var list = tooCommon ? [] : repo.filter(function (r) { return repoCat === "All" || r.category === repoCat; })
       .map(function (r) { return { r: r, score: terms.length ? repoScore(r, terms) : 1 }; })
       .filter(function (x) { return x.score > 0; })
       .sort(function (a, b) { return terms.length ? b.score - a.score || (b.r.uses || 0) - (a.r.uses || 0) : 0; })
@@ -849,7 +867,8 @@
       return '<article class="panel repo-card">' + thumb(r.kind) +
         '<div><span class="eyebrow">' + esc(r.category) + " · " + esc(LAYOUT[r.kind] || r.kind) + "</span><h3>" + esc(r.title) + '</h3><div class="q">Answers: ' + esc(r.question) + "</div></div>" +
         '<div class="foot"><span class="chip num">Reused ' + (r.uses || 0) + '×</span><button class="btn btn-ghost" type="button" data-id="' + esc(r.id) + '">Use this structure</button></div></article>';
-    }).join("") : '<p class="empty">No approved slides match. Try a business question such as “why did costs rise”.</p>';
+    }).join("") : tooCommon ? '<p class="empty">“' + esc(raw) + '” is too common to search on. Add a specific word, such as cost, risk or roadmap.</p>'
+      : '<p class="empty">No approved slides match. Try a business question such as “why did costs rise”.</p>';
   }
   $("#repoFilters").addEventListener("click", function (e) { var b = e.target.closest("button"); if (!b) return; repoCat = b.textContent; renderRepo(); });
   $("#repoSearch").addEventListener("input", renderRepo);

@@ -102,7 +102,10 @@ def transform(slides, actions, brief, feedback=None):
     if actions.get("headlines"):
         rules.append("Rewrite each title as an executive action title: one sentence, 15 words or fewer, stating "
                      "the slide's finding or recommendation rather than its topic. If the slide is a cover, "
-                     "agenda or section divider, keep its title unchanged.")
+                     "agenda or section divider, keep its title unchanged. When the slide compares actuals with "
+                     "targets, compare each pair yourself before writing: 4.10 vs 3.90 is ABOVE target. For costs, "
+                     "error and damage rates, above target is a miss; for delivery, quality and revenue, below "
+                     "target is a miss. Never say 'all' when the pairs point different ways.")
     else:
         rules.append("Keep every title exactly as it is.")
     if actions.get("simplify"):
@@ -177,8 +180,10 @@ def advise(message, brief):
 def sharpen(headline, body, brief, rejected=None):
     """rejected: (previous answer, why it failed), so a retry is told exactly what to fix."""
     system = (
-        "Rewrite the slide headline as an executive action title: one sentence, 15 words or fewer, that states "
-        "the finding or recommendation rather than the topic. Keep every fact and number from the original. "
+        "Rewrite the slide headline as an executive action title: one sentence, 15 words or fewer (aim for 8 to "
+        "12), that states the finding or recommendation rather than the topic. Keep every fact and number from "
+        "the original headline. From the slide content, use at most the one or two figures that carry the "
+        "finding: the body already holds the detail, so do not list every metric. "
         "Do not add numbers that are not in the headline or the slide content. Keep [placeholders] as they are. "
         "Write in the language of the original.\n"
         'Return JSON only: {"headline": string}'
@@ -187,6 +192,10 @@ def sharpen(headline, body, brief, rejected=None):
     user += "\n\nAUDIENCE\n" + _audience(brief or {})["label"]
     if rejected:
         user += "\n\nYOUR PREVIOUS ANSWER WAS REJECTED\n%s\nReason: %s. Fix exactly this." % rejected
+        if "words; the maximum" in rejected[1]:
+            # the usual overshoot: every metric named in turn. Say what they add up to instead.
+            user += (" Write 12 words or fewer: state what the figures add up to (for example 'All three delivery "
+                     "KPIs miss target'), and drop metric names and figures until it fits.")
     return system, user
 
 

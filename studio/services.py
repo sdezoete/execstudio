@@ -11,9 +11,10 @@ import threading
 import time
 from pathlib import Path
 
-from . import catalog, fallback, prompts, review, schema
+from . import __version__, catalog, fallback, prompts, review, schema
 from . import slides as slide_engine
-from .checks import clean_storyline, headline_problem, rewrite_problem
+from .checks import (MAX_HEADLINE_WORDS, clean_storyline, headline_problem, missing_facts, rewrite_problem,
+                     slides_stating_ask)
 from .config import ROOT
 from .extract import PDF_SUPPORTED, ExtractError, extract
 from .llm import LLMClient, LLMError
@@ -93,7 +94,7 @@ class Studio:
         }
 
     def health(self):
-        return {"status": "ok", "llm": self.llm.health(),
+        return {"status": "ok", "version": __version__, "llm": self.llm.health(),
                 "pptx": dict(slide_engine.status(), transform=deck_ops is not None), "pdf": PDF_SUPPORTED}
 
     def storyline(self, payload):
@@ -112,12 +113,29 @@ class Studio:
                 # e.g. one "please send me facts" slide when no facts were given (test report D-09)
                 raise ValueError("the AI returned %d slide%s, fewer than the %d asked for"
                                  % (len(data["slides"]), "" if len(data["slides"]) == 1 else "s", lo))
+            self._shorten_headlines(data["slides"], b)
             return data
 
         result, meta = self._ai("storyline", call, lambda: fallback.storyline(b, version), b)
         result.update(meta)
         result["version"] = version
         return result
+
+    def _shorten_headlines(self, slides, b, limit=3):
+        """Headlines over the word limit get one targeted retry each (at most `limit` per deck, so a bad
+        answer can't multiply the wait); a retry that still fails leaves the original for Quality check
+        to flag."""
+        # cover slides included: Quality check holds every headline to the limit
+        long_ones = [s for s in slides if len(s["headline"].split()) > MAX_HEADLINE_WORDS][:limit]
+        for s in long_ones:
+            try:
+                system, user = prompts.sharpen(s["headline"], s["body"], b, (s["headline"], headline_problem(s["headline"])))
+                h = str(self.llm.chat_json(system, user, max_tokens=300)["headline"]).strip()
+            except (LLMError, ValueError, KeyError, TypeError) as e:
+                log.warning("storyline: could not shorten a headline (%s)", e)
+                continue
+            if h and not headline_problem(h) and not missing_facts([s["headline"]], [h] + s["body"]):
+                s["headline"] = h[:300]
 
     def review(self, payload):
         b = schema.brief(payload.get("brief"))
@@ -158,8 +176,9 @@ class Studio:
             return schema.board_result(self.llm.chat_json(system, user, max_tokens=6000))
 
         result, meta = self._ai("board_assessment", call, lambda: fallback.board_assessment(b, slides, ctx), b)
-        _enforce_decision_slide(result, slides)
+        _enforce_decision_slide(result, slides, b["decision"])
         result["compliance"].insert(0, _sub01(ctx))
+        result["readiness"] = _readiness(result)
         result.update(meta)
         return result
 
@@ -196,9 +215,10 @@ class Studio:
         b = payload.get("brief") if isinstance(payload.get("brief"), dict) else {}
 
         def call():
-            # held to Quality check's own rules: one retry with the reason, then the built-in rules
+            # held to Quality check's own rules: up to two retries with the reason, then the built-in rules
+            # (one retry still fell back about one run in four: the model overshoots to 16-18 words)
             rejected = None
-            for _attempt in range(2):
+            for _attempt in range(3):
                 system, user = prompts.sharpen(headline, body, b, rejected)
                 h = str(self.llm.chat_json(system, user, max_tokens=300)["headline"]).strip()
                 problem = headline_problem(h)
@@ -209,6 +229,8 @@ class Studio:
 
         result, meta = self._ai("sharpen", call, lambda: {"headline": fallback.sharpen(headline)})
         result.update(meta)
+        # lets the UI tell "already an action title" apart from "couldn't rewrite it" (test report R-03)
+        result["meets_rules"] = not headline_problem(result["headline"])
         return result
 
     def extract(self, name, data):
@@ -324,7 +346,7 @@ class Studio:
         if not any(actions.values()):
             raise schema.BadRequest("Choose at least one change to make.")
 
-        texts = deck_ops.slide_texts(data, set(selected))
+        texts = deck_ops.slide_texts(data, set(selected), whole_slide=actions["retemplate"])
         changes, meta_ai = {}, {"source": "none"}
         if actions["headlines"] or actions["simplify"]:
             changes, meta_ai = self._rewrite_slides(texts, actions, b)
@@ -371,6 +393,8 @@ class Studio:
                 if idx not in valid:
                     continue
                 body = item.get("body") if actions["simplify"] and isinstance(item.get("body"), list) else None
+                if len(by_index[idx]["body"]) <= 2:
+                    body = None  # one or two lines (a KPI tile, a caption): nothing to simplify
                 got[idx] = {"title": str(item.get("title") or "").strip()[:300] if actions["headlines"] else "",
                             "body": [str(x).strip()[:400] for x in body if str(x).strip()] if body else None}
             return got
@@ -487,19 +511,44 @@ def _business_days_before(submission, meeting):
     return days
 
 
-def _enforce_decision_slide(result, slides):
+READINESS_CAP_ON_CRITICAL = 2.5
+
+
+def _readiness(result):
+    """The overall board-readiness score: the mean of the scored dimensions, capped while any critical
+    checklist item fails. A deck that fails a critical check is not board-ready, however polished
+    (test report R-02: 4.4/5 with PRES-08 failing)."""
+    scores = [d["score"] for d in result["board_readiness"] if d["score"] is not None]
+    raw = round(sum(scores) / len(scores), 1) if scores else None
+    critical = [c["id"] for c in result["compliance"] if c.get("critical") and c["result"] == "FAIL"]
+    capped = raw is not None and bool(critical) and raw > READINESS_CAP_ON_CRITICAL
+    return {"score": READINESS_CAP_ON_CRITICAL if capped else raw, "raw_score": raw, "capped": capped,
+            "board_ready": not critical, "critical_fails": critical}
+
+
+def _enforce_decision_slide(result, slides, decision):
     """PRES-08 is judged on what the board will see. The model also reads the brief, and has passed
     PRES-08 by quoting a decision that is on no slide (test report D-02), so a deck without a decision
-    slide always fails it, and its Decision clarity score is capped to match Quality check."""
+    slide always fails it, and its Decision clarity score is capped to match Quality check. The wording
+    says where the ask does appear, so it never contradicts a PRES-03 pass that quotes it (N-04)."""
     if any(s.get("kind") == "decision" for s in slides):
         return
+    stated = slides_stating_ask(slides, decision)
+    content = [s for s in slides if s.get("kind") != "title"]
+    last = content[-1]["kind"] if content else "title"
+    if stated:
+        where = "slide%s %s" % ("s" if len(stated) > 1 else "", ", ".join(map(str, stated)))
+        evidence = "The ask is stated on %s, but the deck does not close on it: the final slide is a %s slide." % (where, last)
+        score, comment = 3, "The ask is on %s but is not restated at the close." % where
+    else:
+        evidence = "No slide states the action sought from GEC/GIC; the decision appears only in the brief."
+        score, comment = 2, "No slide states the decision the board is asked to take."
     for c in result["compliance"]:
         if c["id"] == "PRES-08" and c["result"] != "FAIL":
-            c.update(result="FAIL", evidence="No slide states the action sought from GEC/GIC; the decision appears only in the brief.",
-                     action="Add a closing decision slide that restates the ask.")
+            c.update(result="FAIL", evidence=evidence, action="Add a closing decision slide that restates the ask.")
     for d in result["board_readiness"]:
-        if d["id"] == "decision_clarity" and d["score"] is not None and d["score"] > 2:
-            d.update(score=2, comment="No slide states the decision the board is asked to take.")
+        if d["id"] == "decision_clarity" and d["score"] is not None and d["score"] > score:
+            d.update(score=score, comment=comment)
 
 
 def _sub01(ctx):

@@ -79,6 +79,7 @@ main{min-width:0;padding:24px max(16px,env(safe-area-inset-right,0px)) 48px max(
 .text{border:1px solid var(--line);background:var(--bg);border-radius:6px;padding:9px 11px;width:100%}
 .text:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 3px var(--accent-soft)}
 textarea.text{resize:vertical}
+.not-ready{margin:12px 20px 0;padding:10px 12px;border-radius:6px;background:var(--crit-soft);color:var(--crit);font-size:13.5px;line-height:1.45}
 [aria-invalid="true"]{border-color:var(--crit)!important;box-shadow:0 0 0 3px var(--crit-soft)}
 .tasks{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .choice{position:relative}
@@ -311,6 +312,9 @@ textarea.text{resize:vertical}
 @media (max-width:600px){
   .pipeline{grid-template-columns:repeat(3,minmax(0,1fr));overflow-x:visible}
   .stage small{display:none}
+  /* deck views wrap onto a second line rather than hiding Board assessment and Export off-screen */
+  .tabs{flex-wrap:wrap;overflow-x:visible;padding:0 6px}
+  .tabs button{padding:10px 8px 8px}
 }
 @media (max-width:480px){
   /* three equal tabs instead of a sideways-scrolling rail, so every section stays visible */

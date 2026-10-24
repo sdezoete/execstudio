@@ -9,7 +9,9 @@
 """
 import copy
 import io
+import re
 
+from lxml import etree
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE, PP_PLACEHOLDER
 from pptx.oxml.ns import qn
@@ -52,6 +54,40 @@ def _has_text(shp):
     return getattr(shp, "has_text_frame", False) and shp.has_text_frame and bool(shp.text_frame.text.strip())
 
 
+_DGM = "{http://schemas.openxmlformats.org/drawingml/2006/diagram}"
+
+
+def _smartart_text(shp):
+    """The text of a SmartArt diagram. It lives in the diagram's data part, not on the slide, so
+    python-pptx shows the shape as an empty graphic frame."""
+    rel = shp._element.find(".//" + _DGM + "relIds")  # noqa: SLF001
+    if rel is None:
+        return []
+    try:
+        root = etree.fromstring(shp.part.related_part(rel.get(qn("r:dm"))).blob)
+    except Exception:  # noqa: BLE001  (a damaged or unusual diagram: carry what we can, never fail the deck)
+        return []
+    out = []
+    for pt in root.iter(_DGM + "pt"):
+        if pt.get("type", "node") == "node":  # skip the document node and connector "transitions"
+            t = "".join(x.text or "" for x in pt.iter(qn("a:t"))).strip()
+            if t:
+                out.append(t)
+    return out
+
+
+def box_text(shp):
+    """The paragraphs a shape shows: a text box's own, every shape's inside a group (in reading order),
+    or a SmartArt diagram's. Groups and SmartArt are how real decks hold process steps and callouts."""
+    if _has_text(shp):
+        return _text_of(shp)
+    if shp.shape_type == MSO_SHAPE_TYPE.GROUP:
+        return [p for child in reading_order(list(shp.shapes)) for p in box_text(child)]
+    if shp.element.tag == qn("p:graphicFrame"):
+        return _smartart_text(shp)
+    return []
+
+
 def _slide_height(slide):
     try:
         return slide.part.package.presentation_part.presentation.slide_height
@@ -64,7 +100,7 @@ def is_chrome(shp, slide_h):
     a confidentiality mark, or this studio's own evidence note). Never a slide's title or main text."""
     if shp.is_placeholder and shp.placeholder_format.type in CHROME_TYPES:
         return True
-    return bool(slide_h) and shp.top is not None and shp.top >= 0.85 * slide_h and len(shp.text_frame.text.strip()) <= 160
+    return bool(slide_h) and shp.top is not None and shp.top >= 0.85 * slide_h and len(" ".join(box_text(shp))) <= 160
 
 
 def find_title(slide):
@@ -97,22 +133,94 @@ def find_body(slide, title):
     return best
 
 
+_ROW_TOLERANCE = 304800  # 1/3 inch in EMU: boxes whose tops are this close sit on one row
+_PAGE_NUMBER = re.compile(r"^\s*\d{1,3}\s*(/|of)\s*\d{1,3}\s*$", re.I)
+
+
+def _is_badge(text):
+    """Number badges, bullets and step markers ("1", "02", "•", "A") are decoration, not content."""
+    t = text.strip()
+    return len(t) <= 2 or bool(re.fullmatch(r"\W*\d{1,2}\W*", t))
+
+
+def _rows(shapes):
+    """Rows top to bottom, each left to right. Sorting on the exact top position scrambles items laid
+    out side by side whose tops differ by a hair (test report N-08)."""
+    rows = []
+    for shp in sorted(shapes, key=lambda s: s.top or 0):
+        if rows and abs((shp.top or 0) - (rows[-1][0].top or 0)) <= _ROW_TOLERANCE:
+            rows[-1].append(shp)
+        else:
+            rows.append([shp])
+    return [sorted(row, key=lambda s: s.left or 0) for row in rows]
+
+
+def reading_order(shapes):
+    return [shp for row in _rows(shapes) for shp in row]
+
+
+def _is_tile(shp, paras):
+    """A KPI tile: a free text box holding a short figure over its label ("94%" / "On-time delivery").
+    Its two lines read as one point; any other box's paragraphs are separate points (a placeholder's
+    two bullets stay two bullets)."""
+    return (len(paras) == 2 and _has_text(shp) and not shp.is_placeholder
+            and len(paras[0]) <= 12 and any(ch.isdigit() for ch in paras[0]))
+
+
+def _column_heads(row, below):
+    """True when `row` is a row of short labels sitting over the same columns as `below`
+    ("Phase 1 | Phase 2 | Phase 3" above three items): those read as label – item pairs."""
+    return (len(row) == len(below) >= 2
+            and all(len(" ".join(box_text(s))) <= 25 for s in row)
+            and all(abs((a.left or 0) - (b.left or 0)) <= _ROW_TOLERANCE for a, b in zip(row, below)))
+
+
 def other_text(slide, title, body):
     """Text in every other box, in reading order: (content, small_print). content is one line per box
-    (KPI tiles, callouts, labels); small_print is the bottom-edge text that is_chrome() skips, minus
-    slide numbers and dates."""
+    (KPI tiles, callouts, labels), without number badges; small_print is the bottom-edge text that
+    is_chrome() skips, minus slide numbers and dates."""
     skip = {s.shape_id for s in (title, body) if s is not None}
     slide_h = _slide_height(slide)
     content, small = [], []
-    for shp in sorted(slide.shapes, key=lambda s: (s.top or 0, s.left or 0)):
-        if shp.shape_id in skip or not _has_text(shp):
-            continue
-        line = " – ".join(_text_of(shp))
+    for shp in reading_order([s for s in slide.shapes if s.shape_id not in skip and box_text(s)]):
+        line = " – ".join(box_text(shp))
         if not is_chrome(shp, slide_h):
-            content.append(line)
-        elif not (shp.is_placeholder and shp.placeholder_format.type in (PP_PLACEHOLDER.SLIDE_NUMBER, PP_PLACEHOLDER.DATE)):
+            if not _is_badge(line):
+                content.append(line)
+        elif not (shp.is_placeholder and shp.placeholder_format.type in (PP_PLACEHOLDER.SLIDE_NUMBER, PP_PLACEHOLDER.DATE)) \
+                and not _PAGE_NUMBER.match(line):
             small.append(line)
     return content, small
+
+
+def slide_content(slide, title):
+    """All of a slide's text except its title, as one list in reading order: the main text box's
+    paragraphs and every other box, without badges, footers or repeats. This is what a rebuilt slide
+    must carry, and what a rewrite of it must preserve."""
+    slide_h = _slide_height(slide)
+    title_id = title.shape_id if title is not None else None
+    boxes = [s for s in slide.shapes if s.shape_id != title_id and box_text(s)
+             and not is_chrome(s, slide_h) and not _is_badge(" ".join(box_text(s)))]
+    rows = _rows(boxes)
+    cover = _is_cover(slide)  # a cover's subtitle and date stamp are separate lines, never one (R-04)
+    out, k = [], 0
+
+    def add(line):
+        if line and not _is_badge(line) and line not in out:
+            out.append(line)
+
+    while k < len(rows):
+        if k + 1 < len(rows) and _column_heads(rows[k], rows[k + 1]):
+            for head, item in zip(rows[k], rows[k + 1]):
+                add(" – ".join(box_text(head)) + " – " + " – ".join(box_text(item)))
+            k += 2
+            continue
+        for shp in rows[k]:
+            paras = box_text(shp)
+            for line in ([" – ".join(paras)] if not cover and _is_tile(shp, paras) else paras):
+                add(line)
+        k += 1
+    return out
 
 
 def _visuals(slide):
@@ -197,17 +305,24 @@ def replace_paragraphs(tf, lines):
         tx.append(p)
 
 
-def slide_texts(data, indices):
+def slide_texts(data, indices, whole_slide=False):
+    """Title and body text per slide, for the LLM. whole_slide=True (re-templating, where the slide is
+    rebuilt from this text) makes body every text box on the slide, so a simplified body replaces all of
+    it; otherwise body is the main text box only, the one apply_in_place() rewrites, and the rest is
+    read-only other_text."""
     prs = open_deck(data)
     out = []
     for i, slide in enumerate(prs.slides, 1):
         if i not in indices:
             continue
         title = find_title(slide)
-        body = find_body(slide, title)
-        out.append({"index": i, "title": title.text_frame.text.strip() if title else "",
-                    "body": _text_of(body) if body else [],
-                    "other_text": other_text(slide, title, body)[0]})
+        head = title.text_frame.text.strip() if title else ""
+        if whole_slide:
+            out.append({"index": i, "title": head, "body": slide_content(slide, title), "other_text": []})
+        else:
+            body = find_body(slide, title)
+            out.append({"index": i, "title": head, "body": _text_of(body) if body else [],
+                        "other_text": other_text(slide, title, body)[0]})
     return out
 
 
@@ -318,19 +433,26 @@ def retemplate(data, indices, changes, tpl, meta, template_path, template_bytes=
     selected = [(i, s) for i, s in enumerate(src.slides, 1) if i in indices]
     total = len(selected)
     report = []
+    # small print that repeats across the deck (a template name, a confidentiality mark) is the old
+    # template's footer, not something the slide says
+    small_by_slide = {i: other_text(s, find_title(s), find_body(s, find_title(s)))[1] for i, s in selected}
+    seen = {}
+    for lines in small_by_slide.values():
+        for x in set(lines):
+            seen[x] = seen.get(x, 0) + 1
+    repeated = {x for x, k in seen.items() if k > 1}
     for n, (i, s) in enumerate(selected, 1):
         ch = changes.get(i) or {}
         title = find_title(s)
-        body = find_body(s, title)
         head = (ch.get("title") or (title.text_frame.text.strip() if title else "") or "Slide %d" % i).strip()
-        lines = list(ch.get("body") if ch.get("body") else (_text_of(body) if body else []))
+        # the simplified body replaces everything the slide said (it was written from all of it);
+        # otherwise carry every text box: KPI tiles and callouts live in boxes of their own
+        original = slide_content(s, title)
+        lines = list(ch["body"]) if ch.get("body") else original
+        simplified = bool(ch.get("body")) and [x.strip() for x in ch["body"]] != original
+        small_print = [x for x in small_by_slide[i] if x not in repeated]
         pics, charts, tables, other = _visuals(s)
         carried, warnings = [], []
-        # KPI tiles, callouts and labels live in their own boxes: carry their text, never drop it
-        extra_text, small_print = other_text(s, title, body)
-        if extra_text:
-            lines += extra_text
-            carried.append("%d more text box%s added to the main text" % (len(extra_text), "" if len(extra_text) == 1 else "es"))
 
         if _is_cover(s) and not (charts or tables or pics):
             slide = _cover(prs, tpl, head, lines, meta, n, total)
@@ -383,8 +505,12 @@ def retemplate(data, indices, changes, tpl, meta, template_path, template_bytes=
             except Exception:  # noqa: BLE001  (unusual charts/images: report instead of failing the deck)
                 warnings.append("A %s could not be carried over; copy it from the original" %
                                 ("chart" if shp in charts else "table" if shp in tables else "picture"))
-        for _ in other:
-            warnings.append("A diagram, SmartArt, group or media object was not carried over; copy it from the original")
+        for shp in other:
+            if box_text(shp):
+                warnings.append("A %s's text was carried over as points, but not its graphic; copy the graphic from the "
+                                "original if you need it" % ("group" if shp.shape_type == MSO_SHAPE_TYPE.GROUP else "SmartArt diagram"))
+            else:
+                warnings.append("A diagram, group or media object was not carried over; copy it from the original")
 
         eng.footer(prs, c, n, total, meta)
         notes = s.notes_slide.notes_text_frame.text if s.has_notes_slide and s.notes_slide.notes_text_frame else ""
@@ -397,7 +523,7 @@ def retemplate(data, indices, changes, tpl, meta, template_path, template_bytes=
         changes_done = ["Moved onto %s" % meta["template_name"]]
         if ch.get("title") and title is not None and ch["title"].strip() != title.text_frame.text.strip():
             changes_done.append("Headline rewritten")
-        if ch.get("body"):
+        if simplified:
             changes_done.append("Main text simplified")
         report.append({"index": i, "changes": changes_done + carried, "warnings": warnings})
     cp = prs.core_properties

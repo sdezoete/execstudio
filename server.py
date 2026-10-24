@@ -22,7 +22,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from studio import catalog, config, tls
+from studio import __version__, catalog, config, tls
 from studio.extract import ExtractError
 from studio.schema import BadRequest
 from studio.services import Studio
@@ -43,7 +43,7 @@ SECURITY_HEADERS = {
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "ExecStudio/1.0"
+    server_version = "ExecStudio/" + __version__
     protocol_version = "HTTP/1.1"
     timeout = 60                 # seconds a connection may sit idle (also bounds the TLS handshake)
     studio: Studio = None        # set in build_server()
@@ -168,6 +168,20 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(data, dict):
             raise BadRequest("The request body must be a JSON object.")
         return data
+
+    def send_error(self, code, message=None, explain=None):
+        """Errors raised by http.server itself (a method with no do_ handler, a malformed request line)
+        answer in JSON like every other error, never as the library's HTML page."""
+        extra = None
+        if code == HTTPStatus.NOT_IMPLEMENTED and self.command:  # no do_<METHOD>: the method is the problem
+            code, message, extra = (HTTPStatus.METHOD_NOT_ALLOWED,
+                                    "Method %s is not allowed here. Use GET or POST." % self.command, {"Allow": "GET, HEAD, POST"})
+        self.close_connection = True
+        try:
+            self._send(code, json.dumps({"error": message or HTTPStatus(code).phrase}).encode("utf-8"),
+                       "application/json; charset=utf-8", extra)
+        except OSError:
+            pass  # the client is already gone
 
     def _send(self, status, body, ctype, extra=None):
         self.send_response(status)

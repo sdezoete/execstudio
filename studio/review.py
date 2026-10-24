@@ -2,7 +2,7 @@
 import re
 
 from .catalog import AUDIENCE_BY_ID, slide_range, template
-from .checks import MAX_HEADLINE_WORDS, TOPIC_LABEL as _TOPIC_LABEL
+from .checks import MAX_HEADLINE_WORDS, MIN_HEADLINE_WORDS, TOPIC_LABEL as _TOPIC_LABEL
 
 _PLACEHOLDER = re.compile(r"\[[^\]]+\]")
 
@@ -24,7 +24,7 @@ def run(brief, slides):
     })
 
     weak = [i + 1 for i, s in enumerate(slides) if s["kind"] != "title" and
-            (_PLACEHOLDER.search(s["headline"]) or _TOPIC_LABEL.search(s["headline"]) or _words(s["headline"]) < 5)]
+            (_PLACEHOLDER.search(s["headline"]) or _TOPIC_LABEL.search(s["headline"]) or _words(s["headline"]) < MIN_HEADLINE_WORDS)]
     checks.append({
         "ok": not weak,
         "title": "Every slide has an action title",
@@ -92,31 +92,90 @@ def run(brief, slides):
     return {"checks": checks, "range": [lo, hi]}
 
 
-# Additive units only: points and amounts. Percent growth rates are not additive (segments at +12% and
-# -3% can make +4% overall), so "%" is deliberately absent.
-_QTY = re.compile(r"([+\-−]?\d+(?:\.\d+)?)\s*(pts|pp|ppt|m|bn|k)\b", re.I)
+# "Figures add up" works on additive quantities: points and amounts, plus shares of a whole. Percent
+# growth rates are not additive (segments at +12% and -3% can make +4% overall), and actual / plan /
+# variance figures are not parts of a total (N-02: "48.2m vs plan 51.0m, a 2.8m miss" is not
+# 48.2 + 51 + 2.8), so both are left alone.
+_N = r"[+\-−]?\d[\d,]*(?:\.\d+)?"
+_UNIT = r"(pts?|points?|percentage points?|pp|ppt|m|mn|million|bn|billion|k|thousand|%)"
+_QTY = re.compile(r"(" + _N + r")\s*-?\s*" + _UNIT + r"(?![A-Za-z])", re.I)
+_UNITS = {"pt": "pts", "pts": "pts", "point": "pts", "points": "pts", "percentage point": "pts", "percentage points": "pts",
+          "pp": "pts", "ppt": "pts", "m": "m", "mn": "m", "million": "m", "bn": "bn", "billion": "bn",
+          "k": "k", "thousand": "k", "%": "%"}
+_EQUATION = re.compile(r"(" + _N + r")(?:\s*-?\s*" + _UNIT + r")?((?:\s*(?:\+|plus)\s*" + _N + r"(?:\s*-?\s*" + _UNIT + r")?)+)"
+                       r"\s*(?:=|equals?|makes?|gives?|sums? to|adds? up to|totals?|come to|comes to)\s*(?:the\s+|a\s+)?(" + _N + r")", re.I)
+_TOTAL = re.compile(r"\b(total|overall|in all|altogether|combined)\b", re.I)
 _PHANTOM = re.compile(r"\b(unexplained|not specified|unspecified|unaccounted|remaining (gap|decline|difference)|other factors)\b", re.I)
+_PARTIAL = re.compile(r"\b(other|others|rest|remainder|remaining|mainly|largely|main|primarily|partly|partially|including|such as)\b", re.I)
+_COMPARISON = re.compile(r"\b(vs\.?|versus|against|plan|target|budget|forecast|prior year|last year|actual)\b", re.I)
+_SHARE = re.compile(r"\b(share|shares|mix|split|breakdown|portion|composition|of (total|revenue|sales|spend|volume|the total))\b", re.I)
+_GROWTH = re.compile(r"[+\-−]\s*\d|\b(up|down|growth|grew|rose|fell|increase\w*|decrease\w*|decline\w*|yoy|qoq)\b", re.I)
+
+
+def _num(s):
+    return abs(float(s.replace("−", "-").replace(",", "")))
+
+
+def _qty(text, unit=None):
+    """[(value, unit)] in text, units normalised; only `unit` if given."""
+    out = [(_num(n), _UNITS[u.lower()]) for n, u in _QTY.findall(text or "")]
+    return [q for q in out if unit is None or q[1] == unit]
+
+
+def _close(a, b):
+    return abs(a - b) <= max(0.051, 0.005 * max(a, b))  # rounding to one decimal, or 0.5%
 
 
 def _sum_problem(slide):
-    """The headline's figure is the total; body figures in the same unit are its parts. Flags parts that
-    overshoot the total, and a "remaining gap" that cannot exist because the parts already make the total
-    (test report D-06: freight 0.9 + materials 1.2 = 2.1 pts, yet the slide called part of it unspecified)."""
-    head = _QTY.findall(slide["headline"])
-    if not head:
-        return ""
-    total_s, unit = max(head, key=lambda q: abs(float(q[0].replace("−", "-"))))
-    total, unit = abs(float(total_s.replace("−", "-"))), unit.lower()
-    parts = [abs(float(n.replace("−", "-"))) for b in slide["body"] for n, u in _QTY.findall(b) if u.lower() == unit]
-    if len(parts) < 2:
-        return ""
-    s = round(sum(parts), 4)
-    shown = " + ".join("%g" % p for p in parts) + " = %g %s" % (s, unit)
-    if s > total + 0.051:
-        return "the parts (%s) are more than the total of %g %s" % (shown, total, unit)
-    text = " ".join([slide["headline"]] + slide["body"] + [slide.get("notes") or ""])
-    if abs(s - total) <= 0.051 and _PHANTOM.search(text):
-        return "the parts already make the total (%s), but the slide says part of it is unexplained" % shown
+    """Parts that do not make their total. Three cases:
+    - a written sum that is wrong ("0.9 plus 1.6 equals the 2.1-point decline");
+    - parts against a total that is labelled ("Total EUR 48.2m"), or on a driver slide the headline's
+      figure: parts above the total, parts below it with nothing said about the rest, or a "remaining
+      gap" that cannot exist because the parts already make the total (D-06);
+    - shares of a whole that add up to more than 100%."""
+    lines = [slide["headline"]] + list(slide["body"])
+    text = " ".join(lines + [slide.get("notes") or ""])
+
+    for line in lines:
+        m = _EQUATION.search(line)
+        if m:
+            left = [_num(m.group(1))] + [_num(n) for n in re.findall(_N, m.group(3))]
+            right = _num(m.group(5))
+            if not _close(sum(left), right):
+                return "%s makes %g, not %g" % (" + ".join("%g" % x for x in left), sum(left), right)
+
+    total = None
+    for line in lines:
+        if _TOTAL.search(line) and not _COMPARISON.search(line):
+            q = [x for x in _qty(line) if x[1] != "%"]
+            if q:
+                total, total_line = max(q), line
+                break
+    if total is None and slide.get("kind") == "driver":
+        q = [x for x in _qty(slide["headline"]) if x[1] != "%"]
+        if q:
+            total, total_line = max(q), slide["headline"]
+    if total is not None:
+        value, unit = total
+        # a line carrying the total's own value restates it ("together they explain the full 2.1-point
+        # decline"); it is not one more part
+        parts = [v for b in slide["body"] if b != total_line and not _COMPARISON.search(b) and not _EQUATION.search(b)
+                 and not _TOTAL.search(b) and not any(_close(x, value) for x, _u in _qty(b, unit))
+                 for v, _u in _qty(b, unit)]
+        if len(parts) >= 2:
+            s = round(sum(parts), 4)
+            shown = " + ".join("%g" % p for p in parts) + " = %g %s" % (s, unit)
+            if s > value and not _close(s, value):
+                return "the parts (%s) are more than the total of %g %s" % (shown, value, unit)
+            if _close(s, value) and _PHANTOM.search(text):
+                return "the parts already make the total (%s), but the slide says part of it is unexplained" % shown
+            if s < value and not _close(s, value) and not _PARTIAL.search(text):
+                return "the parts (%s) fall short of the total of %g %s; name the rest or correct a figure" % (shown, value, unit)
+
+    if _SHARE.search(text):
+        shares = [v for b in slide["body"] if not _COMPARISON.search(b) and not _GROWTH.search(b) for v, _u in _qty(b, "%")]
+        if len(shares) >= 2 and sum(shares) > 100.5:
+            return "the shares (%s) add up to %g%%, more than 100%%" % (" + ".join("%g%%" % x for x in shares), sum(shares))
     return ""
 
 

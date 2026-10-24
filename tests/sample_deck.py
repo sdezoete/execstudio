@@ -90,6 +90,88 @@ def build_report_deck():
     return buf.getvalue()
 
 
+_DGM_NS = "http://schemas.openxmlformats.org/drawingml/2006/diagram"
+_A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+_R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+
+def _add_smartart(slide, nodes, x, y, w, h):
+    """A SmartArt graphic frame plus its diagram-data part, which is where PowerPoint keeps the text.
+    Only the data part is built (no layout/style parts), which is all a text reader needs."""
+    from lxml import etree
+    from pptx.opc.package import Part
+    from pptx.opc.packuri import PackURI
+    pts = ['<dgm:pt modelId="0" type="doc"><dgm:t><a:bodyPr/><a:p><a:endParaRPr/></a:p></dgm:t></dgm:pt>']
+    for k, text in enumerate(nodes, 1):
+        pts.append('<dgm:pt modelId="%d"><dgm:t><a:bodyPr/><a:p><a:r><a:t>%s</a:t></a:r></a:p></dgm:t></dgm:pt>' % (k, text))
+        pts.append('<dgm:pt modelId="%d" type="parTrans"><dgm:t><a:bodyPr/><a:p><a:r><a:t>connector</a:t></a:r></a:p></dgm:t></dgm:pt>' % (100 + k))
+    xml = ('<dgm:dataModel xmlns:dgm="%s" xmlns:a="%s"><dgm:ptLst>%s</dgm:ptLst><dgm:cxnLst/></dgm:dataModel>'
+           % (_DGM_NS, _A_NS, "".join(pts)))
+    part = Part(PackURI("/ppt/diagrams/data%d.xml" % slide.slide_id), "application/vnd.openxmlformats-officedocument.drawingml.diagramData+xml",
+                slide.part.package, xml.encode("utf-8"))
+    rid = slide.part.relate_to(part, _R_NS + "/diagramData")
+    frame = etree.fromstring(
+        '<p:graphicFrame xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="%s" xmlns:r="%s">'
+        '<p:nvGraphicFramePr><p:cNvPr id="%d" name="Diagram"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>'
+        '<p:xfrm><a:off x="%d" y="%d"/><a:ext cx="%d" cy="%d"/></p:xfrm><a:graphic><a:graphicData uri="%s">'
+        '<dgm:relIds xmlns:dgm="%s" r:dm="%s" r:lo="" r:qs="" r:cs=""/></a:graphicData></a:graphic></p:graphicFrame>'
+        % (_A_NS, _R_NS, 900 + slide.slide_id, Inches(x), Inches(y), Inches(w), Inches(h), _DGM_NS, _DGM_NS, rid))
+    slide.shapes._spTree.append(frame)  # noqa: SLF001
+
+
+def build_customer_deck():
+    """A deck built the way people build them in PowerPoint, not exported by this app: multi-level
+    bullets, a two-content layout, a grouped process diagram with a caption outside the group, a
+    SmartArt diagram, a table with a native chart, and speaker notes."""
+    prs = Presentation()
+    s1 = prs.slides.add_slide(prs.slide_layouts[0])
+    s1.shapes.title.text = "FY26 supply chain review"
+    s1.placeholders[1].text = "Prepared for the Executive Committee"
+    s1.placeholders[1].text_frame.add_paragraph().text = "October 2026"
+
+    s2 = prs.slides.add_slide(prs.slide_layouts[1])
+    s2.shapes.title.text = "Where we stand"
+    tf = s2.placeholders[1].text_frame
+    tf.text = "Service level reached 93.5% in Q3"
+    for text, level in [("Up from 91.2% in Q2", 1), ("Inventory turns 7.8 vs 8.5 target", 0),
+                        ("Northern DC below 6 turns", 1), ("Expedited freight EUR 2.4m year to date", 0)]:
+        p = tf.add_paragraph()
+        p.text, p.level = text, level
+    s2.notes_slide.notes_text_frame.text = "Stress the service gain before the inventory gap."
+
+    s3 = prs.slides.add_slide(prs.slide_layouts[3])  # Two Content
+    s3.shapes.title.text = "Strengths and gaps"
+    s3.placeholders[1].text = "Supplier OTIF 96%"
+    s3.placeholders[1].text_frame.add_paragraph().text = "Forecast accuracy 82%"
+    s3.placeholders[2].text = "Two single-source SKUs in Asia"
+    s3.placeholders[2].text_frame.add_paragraph().text = "Warehouse Leeds at 97% capacity"
+
+    s4 = prs.slides.add_slide(prs.slide_layouts[5])
+    s4.shapes.title.text = "Operating model"
+    grp = s4.shapes.add_group_shape()
+    for k, text in enumerate(["Plan: monthly S&OP with Finance", "Source: dual-source 12 SKUs", "Deliver: two new 3PL lanes"]):
+        grp.shapes.add_textbox(Inches(0.5 + k * 3.1), Inches(2.4), Inches(2.9), Inches(1.2)).text_frame.text = text
+    s4.shapes.add_textbox(Inches(0.5), Inches(4.2), Inches(9), Inches(0.6)).text_frame.text = "Owner: Chief Operating Officer"
+
+    s5 = prs.slides.add_slide(prs.slide_layouts[5])
+    s5.shapes.title.text = "Roadmap"
+    _add_smartart(s5, ["Assess network by December", "Select partners in January", "Launch pilot in Q1 2027"], 0.5, 2.0, 9, 3)
+
+    s6 = prs.slides.add_slide(prs.slide_layouts[5])
+    s6.shapes.title.text = "Cost by region"
+    tbl = s6.shapes.add_table(3, 3, Inches(0.5), Inches(1.8), Inches(4.5), Inches(1.4)).table
+    for r, row in enumerate([["Region", "Cost", "Change"], ["North", "EUR 5.1m", "+4%"], ["South", "EUR 3.7m", "-2%"]]):
+        for c, v in enumerate(row):
+            tbl.cell(r, c).text = v
+    cd = CategoryChartData()
+    cd.categories = ["North", "South"]
+    cd.add_series("Cost (EUR m)", (5.1, 3.7))
+    s6.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, Inches(5.3), Inches(1.8), Inches(4.2), Inches(3.5), cd)
+    buf = io.BytesIO()
+    prs.save(buf)
+    return buf.getvalue()
+
+
 if __name__ == "__main__":
     with open(sys.argv[1] if len(sys.argv) > 1 else "sample.pptx", "wb") as fh:
         fh.write(build())

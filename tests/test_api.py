@@ -4,6 +4,7 @@
 """
 import io
 import json
+import re
 import os
 import sys
 import threading
@@ -84,6 +85,16 @@ class WithLLM(Base):
         for p in ("/static/js/app.js", "/static/js/api.js", "/static/js/thumbs.js", "/static/css/app.css", "/static/img/icon.svg"):
             self.assertEqual(self.get(p)[0], 200, p)
 
+    def test_wrong_method_answers_json(self):  # round 3 carry-over: was an HTML 501 page
+        for method in ("PUT", "DELETE", "PATCH"):
+            req = urllib.request.Request(self.base + "/api/storyline", data=b"{}", method=method)
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                urllib.request.urlopen(req, timeout=10)
+            self.assertEqual(cm.exception.code, 405)
+            self.assertIn("application/json", cm.exception.headers["Content-Type"])
+            self.assertIn("GET, HEAD, POST", cm.exception.headers["Allow"])
+            self.assertIn("not allowed", json.loads(cm.exception.read())["error"])
+
     def test_path_traversal_blocked(self):
         try:
             st = self.get("/static/../server.py")[0]
@@ -121,6 +132,15 @@ class WithLLM(Base):
         out = clean_storyline([{"notes": "Please share the data.", "evidence": {"status": "linked", "source": "SOURCE DOCUMENTS"}}], False)
         self.assertEqual((out[0]["notes"], out[0]["evidence"]["status"]), ("", "needed"))
 
+    def test_storyline_long_headlines_shortened(self):  # retest side note: a 16-word generated headline
+        topic = "quarterly review of warehouse safety incidents and the corrective actions taken across all regional sites"
+        mock_llm.SHARPEN_REPLIES[:] = ["Warehouse safety incidents fell after corrective actions", "Next: roll corrective actions out to every site"]
+        s = json.loads(self.post("/api/storyline", {"brief": dict(BRIEF, topic=topic, facts="Incidents down 12%. Audits up 8%."), "version": "full"})[2])
+        mock_llm.SHARPEN_REPLIES[:] = []
+        self.assertEqual(s["source"], "llm")
+        long_ones = [x["headline"] for x in s["slides"] if x["kind"] != "title" and len(x["headline"].split()) > 15]
+        self.assertEqual(long_ones, [])
+
     def test_review_flags_phantom_gap(self):  # D-06
         slide = {"kind": "driver", "headline": "Margin fell 2.1 pts on freight and raw materials",
                  "body": ["Freight +0.9 pts", "Raw materials +1.2 pts", "Remaining gap not specified"],
@@ -132,6 +152,41 @@ class WithLLM(Base):
         slide["body"] = slide["body"][:2]
         r = json.loads(self.post("/api/review", {"brief": BRIEF, "slides": [slide]})[2])
         self.assertTrue(next(c for c in r["checks"] if c["title"] == "Figures add up")["ok"])
+        # N-02: actual / plan / variance is not a bridge, on any kind of slide
+        for kind, head in (("bars", "Revenue missed plan by EUR 2.8m"), ("driver", "Revenue is EUR 48.2m, EUR 2.8m short of plan")):
+            vs = {"kind": kind, "headline": head, "evidence": {"status": "linked", "source": "Finance"},
+                  "body": ["Revenue EUR 48.2m vs plan EUR 51.0m", "Gap of EUR 2.8m (-5.5%)", "Plan was EUR 51m"]}
+            r = json.loads(self.post("/api/review", {"brief": BRIEF, "slides": [vs]})[2])
+            self.assertTrue(next(c for c in r["checks"] if c["title"] == "Figures add up")["ok"], (kind, r["checks"]))
+
+    def test_figures_add_up_both_directions(self):  # R-01: catches real mismatches, no false alarms (N-02)
+        from studio.review import _sum_problem
+        s = lambda kind, head, body, notes="": {"kind": kind, "headline": head, "body": body, "notes": notes}  # noqa: E731
+        must_fail = [
+            s("driver", "Freight and raw materials explain the full 2.1-point gross margin decline",
+              ["Freight contributed 0.9 points", "Raw materials contributed 1.6 points", "0.9 plus 1.6 equals the 2.1-point decline"]),
+            s("bars", "Total revenue reached EUR 48.2m in Q3", ["North EUR 20m", "South EUR 15m", "West EUR 10m"]),
+            s("summary", "Revenue is spread across three regions", ["North EUR 20m", "South EUR 15m", "West EUR 10m", "Total EUR 48.2m"]),
+            s("summary", "Enterprise leads the revenue mix", ["Enterprise 55% of revenue", "Mid-market 35%", "SMB 20%"]),
+            s("driver", "Margin fell 1.8 pts", ["Freight 0.9 pts", "Materials 1.2 pts"]),
+        ]
+        must_pass = [
+            s("driver", "Freight and raw materials explain the full 2.1-point decline",
+              ["Freight 0.9 points", "Raw materials 1.2 points", "0.9 plus 1.2 equals the 2.1-point decline"]),
+            s("driver", "Revenue is EUR 48.2m, EUR 2.8m short of plan", ["Revenue EUR 48.2m vs plan EUR 51.0m", "Gap of EUR 2.8m (-5.5%)"]),
+            s("summary", "Revenue up 4% overall", ["Enterprise +12%", "SMB -3%"]),
+            s("driver", "Margin fell 2.5 pts", ["Freight 0.9 pts", "Materials 1.2 pts"], "Other factors explain the rest."),
+            s("bars", "Total revenue reached EUR 45m in Q3", ["North EUR 20m", "South EUR 15m", "West EUR 10m"]),
+            s("summary", "Enterprise leads the revenue mix", ["Enterprise 55% of revenue", "Mid-market 35%", "SMB 10%"]),
+            s("kpi", "Revenue and margin missed plan", ["Revenue EUR 48.2m vs EUR 51.0m", "Margin 31.4%, down 2.1 pts", "Churn 4.1% vs 3.5%"]),
+            # seen live: a body line restating the total is not a third part
+            s("driver", "Freight and raw materials explain the full 2.1-point gross margin decline",
+              ["Freight added 0.9 pts", "Raw materials added 1.2 pts", "Together they explain the full 2.1-point decline"]),
+        ]
+        for sl in must_fail:
+            self.assertTrue(_sum_problem(sl), sl)
+        for sl in must_pass:
+            self.assertEqual(_sum_problem(sl), "", sl)
 
     def test_advise_and_sharpen(self):
         a = json.loads(self.post("/api/advise", {"message": "why did turnover increase"})[2])
@@ -144,10 +199,12 @@ class WithLLM(Base):
         mock_llm.SHARPEN_REPLIES[:] = [long_one]                    # first answer too long, retry is fine
         h = json.loads(self.post("/api/sharpen", {"headline": "KPIs", "body": []})[2])
         self.assertEqual((h["source"], h["headline"]), ("llm", "Margin fell 1.8 pts, driven by input costs"))
-        mock_llm.SHARPEN_REPLIES[:] = [long_one, long_one]          # never fixed: built-in rules, never the long one
+        mock_llm.SHARPEN_REPLIES[:] = [long_one] * 3                 # never fixed: built-in rules, never the long one
         h = json.loads(self.post("/api/sharpen", {"headline": "KPIs", "body": []})[2])
         self.assertEqual(h["source"], "rules")
         self.assertLessEqual(len(h["headline"].split()), 15)
+        self.assertEqual(h["headline"], "KPIs")
+        self.assertFalse(h["meets_rules"])            # R-03: the UI must not call "KPIs" an action title
 
     def test_export_pptx_valid(self):
         s = json.loads(self.post("/api/storyline", {"brief": BRIEF, "version": "full"})[2])
@@ -291,6 +348,96 @@ class Decks(Base):
         self.assertEqual(st, 400)
         self.assertIn("Upload it again", json.loads(body)["error"])
 
+    # ---- N-01 / N-08: re-templating a deck this app exported (badges, tiles, footers)
+    def _upload_app_deck(self):
+        slides = [{"kind": "title", "headline": "Logistics update", "body": ["Operations"]},
+                  {"kind": "summary", "headline": "Overview", "body": ["On-time delivery 91% vs 95% target", "Warehouse B reached 97%",
+                   "Carrier X contract runs to March 2027", "Fuel surcharge up 6%", "Returns backlog 1,800 parcels"]},
+                  {"kind": "kpi", "headline": "KPIs", "body": ["On-time 91% vs 95%", "Cost per parcel EUR 4.10 vs 3.90", "Damage rate 0.8% vs 0.5%"]},
+                  {"kind": "roadmap", "headline": "Next steps", "body": ["Discuss", "Review", "Follow up"]}]
+        st, _, exported = self.post("/api/export/pptx", {"brief": BRIEF, "title": "Logistics update", "slides": slides})
+        self.assertEqual(st, 200)
+        st, _, body = self.post("/api/deck/upload", raw=exported, headers={"X-Filename": "Logistics_update_test.pptx"})
+        return json.loads(body)
+
+    def test_retemplate_app_deck_no_duplicates(self):
+        d = self._upload_app_deck()
+        for actions in ({"headlines": True, "simplify": True, "retemplate": True}, {"retemplate": True}):
+            st, _, body = self.post("/api/deck/transform", {"deck_id": d["deck_id"], "selected": [2, 3, 4], "actions": actions, "brief": BRIEF})
+            self.assertEqual(st, 200, body)
+            r = json.loads(body)
+            prs = self._open(r["file_id"])
+            for s in prs.slides:
+                title_id = s.shapes.title.shape_id if s.shapes.title is not None else None
+                paras = [p.text.strip() for sh in s.shapes if sh.has_text_frame and sh.shape_id != title_id
+                         for p in sh.text_frame.paragraphs if p.text.strip()]
+                content = [p for p in paras if not re.fullmatch(r"\d+ / \d+|Corporate Master", p)]
+                self.assertFalse([p for p in content if re.fullmatch(r"\d{1,2}", p)], (actions, content))   # no stray badges
+                self.assertEqual(len(content), len(set(content)), (actions, content))                      # nothing twice
+                if actions.get("simplify"):
+                    self.assertLessEqual(len(content), 5, content)
+                notes = s.notes_slide.notes_text_frame.text
+                self.assertNotIn("Small print", notes)                  # old footer and page numbers are not content
+            joined = lambda s: " ".join(sh.text_frame.text for sh in s.shapes if sh.has_text_frame)  # noqa: E731
+            for fact in ("91%", "97%", "March 2027", "6%", "1,800"):
+                self.assertIn(fact, joined(prs.slides[0]), actions)
+            for fact in ("4.10", "3.90", "0.8%", "0.5%"):
+                self.assertIn(fact, joined(prs.slides[1]), actions)
+            steps = joined(prs.slides[2])
+            self.assertLess(steps.index("Discuss"), steps.index("Review"), steps)  # order kept (N-08)
+            self.assertLess(steps.index("Review"), steps.index("Follow up"), steps)
+
+    def test_customer_deck_groups_smartart_tables(self):  # round 3: a deck built in PowerPoint, not by this app
+        st, _, body = self.post("/api/deck/upload", raw=sample_deck.build_customer_deck(), headers={"X-Filename": "customer.pptx"})
+        self.assertEqual(st, 200, body)
+        d = json.loads(body)
+        facts = ["93.5%", "91.2%", "7.8", "8.5", "EUR 2.4m", "OTIF 96%", "82%", "Asia", "Leeds", "97%", "S&OP", "12 SKUs",
+                 "3PL", "Chief Operating Officer", "December", "January", "Q1 2027", "Executive Committee", "October 2026"]
+        for actions in ({"retemplate": True}, {"headlines": True, "simplify": True, "retemplate": True}, {"headlines": True, "simplify": True}):
+            st, _, body = self.post("/api/deck/transform", {"deck_id": d["deck_id"], "selected": [1, 2, 3, 4, 5, 6],
+                                    "actions": actions, "brief": BRIEF})
+            self.assertEqual(st, 200, body)
+            r = json.loads(body)
+            prs = self._open(r["file_id"])
+            from studio.slides.deck import box_text                       # reads inside groups and SmartArt too
+            text = " ".join(p for s in prs.slides for sh in s.shapes for p in box_text(sh))
+            text += " ".join(s.notes_slide.notes_text_frame.text for s in prs.slides)
+            self.assertEqual([f for f in facts if f not in text], [], actions)
+            for s in prs.slides:                                             # nothing on a slide twice
+                paras = [p.text.strip() for sh in s.shapes if sh.has_text_frame for p in sh.text_frame.paragraphs if p.text.strip()]
+                paras = [p for p in paras if not re.fullmatch(r"\d+ / \d+|Corporate Master", p)]
+                self.assertEqual(len(paras), len(set(paras)), (actions, paras))
+            last = prs.slides[5]
+            self.assertTrue(any(getattr(sh, "has_table", False) and sh.has_table for sh in last.shapes))
+            self.assertTrue(any(getattr(sh, "has_chart", False) and sh.has_chart for sh in last.shapes))
+            if actions.get("retemplate"):
+                warn = " ".join(w for x in r["report"] for w in x["warnings"])
+                self.assertIn("group's text was carried over", warn)
+                self.assertIn("SmartArt diagram's text was carried over", warn)
+
+    def test_in_place_never_copies_other_boxes(self):  # N-01 in place: a KPI tile as the "main text"
+        from studio.checks import rewrite_problem
+        original = {"title": "Key metrics", "body": ["94%", "On-time delivery"],
+                    "other_text": ["3.2 days – Average lead time", "SAR 1.4m – Monthly freight spend"]}
+        copy = {"title": "", "body": ["94% on-time delivery", "3.2 days – Average lead time", "SAR 1.4m – Monthly freight spend"]}
+        self.assertIn("other boxes", rewrite_problem(original, copy))
+        d = self._upload_report_deck()
+        st, _, body = self.post("/api/deck/transform", {"deck_id": d["deck_id"], "selected": [3],
+                                "actions": {"simplify": True}, "brief": BRIEF})
+        r = json.loads(body)
+        s = self._open(r["file_id"]).slides[2]
+        paras = [p.text for sh in s.shapes if sh.has_text_frame for p in sh.text_frame.paragraphs if p.text.strip()]
+        self.assertEqual(len(paras), len(set(paras)), paras)                  # each tile's text once
+        self.assertNotIn("Main text simplified", " ".join(r["report"][0]["changes"]))
+
+    def test_transform_title_direction_checked(self):  # N-03
+        from studio.checks import rewrite_problem
+        original = {"title": "KPIs", "body": ["On-time 91% vs 95%", "Cost per parcel EUR 4.10 vs 3.90", "Damage rate 0.8% vs 0.5%"]}
+        bad = {"title": "Cost per parcel, on-time delivery, and damage rate are all below target", "body": None}
+        self.assertIn("above target", rewrite_problem(original, bad))
+        good = {"title": "All three KPIs miss target: cost 4.10 vs 3.90, damage 0.8% vs 0.5%", "body": None}
+        self.assertEqual(rewrite_problem(original, good), "")
+
     # ---- D-02: board assessment judges the slides, not the brief
     def test_board_pres08_fails_without_decision_slide(self):
         slides = [{"kind": "summary", "headline": "Margin fell 1.8 pts on input costs", "body": ["Freight +0.9 pts"]},
@@ -303,9 +450,25 @@ class Decks(Base):
         self.assertEqual(pres08["result"], "FAIL")
         clarity = next(d for d in r["board_readiness"] if d["id"] == "decision_clarity")
         self.assertLessEqual(clarity["score"], 2)
+        self.assertIn("appears only in the brief", pres08["evidence"])
+        # R-02: a failing critical check caps the overall readiness score
+        self.assertEqual(r["readiness"]["critical_fails"], ["PRES-08"])
+        self.assertFalse(r["readiness"]["board_ready"])
+        self.assertTrue(r["readiness"]["capped"])
+        self.assertEqual(r["readiness"]["score"], 2.5)
+        self.assertGreater(r["readiness"]["raw_score"], 2.5)
+        # N-04: the ask is on slide 1 but the deck closes on a roadmap: still FAIL, and the wording says so
+        opener = dict(slides[0], body=["Approve a 3% mid-market price increase from January", "Freight +0.9 pts"])
+        r = json.loads(self.post("/api/board-assessment", {"brief": BRIEF, "slides": [opener, slides[1]], "context": {}})[2])
+        pres08 = next(c for c in r["compliance"] if c["id"] == "PRES-08")
+        self.assertEqual(pres08["result"], "FAIL")
+        self.assertIn("stated on slide 1", pres08["evidence"])
+        self.assertEqual(next(d for d in r["board_readiness"] if d["id"] == "decision_clarity")["score"], 3)
         slides.append({"kind": "decision", "headline": "Approve a 3% price increase", "body": ["Approve today"]})
         r = json.loads(self.post("/api/board-assessment", {"brief": BRIEF, "slides": slides, "context": {}})[2])
         self.assertEqual(next(c for c in r["compliance"] if c["id"] == "PRES-08")["result"], "PASS")
+        self.assertFalse(r["readiness"]["capped"])                       # no critical failure: no cap
+        self.assertGreater(r["readiness"]["score"], 2.5)
 
     def test_board_rejects_meeting_before_submission(self):  # D-07
         slides = [{"kind": "decision", "headline": "Approve a 3% price increase", "body": ["Approve today"]}]

@@ -149,7 +149,9 @@ class H(BaseHTTPRequestHandler):
         elif "Compliance Reviewer" in system:
             # an over-generous reviewer: passes everything and quotes the brief (test report D-02)
             out = {"compliance": [{"id": "PRES-08", "result": "PASS", "evidence": "Closing confirms the decision.", "action": ""}],
-                   "board_readiness": {"decision_clarity": {"score": 5, "comment": "Clear ask."}},
+                   "board_readiness": {d: {"score": 5 if d == "decision_clarity" else 4, "comment": "Good."} for d in (
+                       "decision_clarity", "executive_relevance", "message_titles", "evidence", "conciseness",
+                       "decision_flow", "technical_depth", "consistency", "risk_visibility", "closing_decision")},
                    "summary": "Ready."}
         elif "pre-read" in system:
             out = {"brief": "## Context\nTest brief."}
