@@ -311,6 +311,21 @@ def replace_paragraphs(tf, lines):
         tx.append(p)
 
 
+def point_boxes(slide, title):
+    """The text boxes of a slide whose points each sit in a box of their own (an exported deck, or bullets
+    drawn as shapes), in reading order; [] for any other slide. KPI tiles and short labels do not count:
+    only wordy points are worth simplifying one by one (round 8 W-02)."""
+    slide_h = _slide_height(slide)
+    title_id = title.shape_id if title is not None else None
+    boxes = [s for s in slide.shapes if s.shape_id != title_id and _has_text(s) and not is_chrome(s, slide_h)
+             and not _is_badge(s.text_frame.text)]
+    boxes = reading_order(boxes)
+    if len(boxes) < 3 or any(_is_tile(s, _text_of(s)) for s in boxes):
+        return []
+    wordy = [s for s in boxes if len(" ".join(_text_of(s))) > 30]
+    return boxes if len(wordy) * 2 >= len(boxes) else []
+
+
 def slide_data(slide):
     """The values in a slide's charts and tables, as short lines of text, so a headline can be written
     from them (test report S-02: a chart slide kept its topic title "Sales by channel")."""
@@ -347,8 +362,12 @@ def slide_texts(data, indices, whole_slide=False):
             item = {"index": i, "title": head, "body": slide_content(slide, title), "other_text": []}
         else:
             body = find_body(slide, title)
-            item = {"index": i, "title": head, "body": _text_of(body) if body else [],
-                    "other_text": other_text(slide, title, body)[0]}
+            boxes = point_boxes(slide, title) if not body or len(_text_of(body)) <= 2 else []
+            if boxes:  # points in separate boxes: each box is one point, shortened where it stands
+                item = {"index": i, "title": head, "body": [" ".join(_text_of(b)) for b in boxes], "other_text": [], "boxes": True}
+            else:
+                item = {"index": i, "title": head, "body": _text_of(body) if body else [],
+                        "other_text": other_text(slide, title, body)[0]}
         item["data"] = slide_data(slide)        # read-only chart and table values
         item["cover"] = _is_cover(slide)
         out.append(item)
@@ -372,7 +391,19 @@ def apply_in_place(data, changes):
                 notes.append("Headline rewritten")
         elif ch.get("title"):
             notes.append("No title found on this slide; headline not changed")
-        if ch.get("body") is not None:
+        if ch.get("body") is not None and ch.get("boxes"):
+            boxes = point_boxes(slide, title)
+            if len(boxes) == len(ch["body"]):
+                done = 0
+                for shp, new in zip(boxes, ch["body"]):
+                    if new.strip() and new.strip() != " ".join(_text_of(shp)):
+                        replace_paragraphs(shp.text_frame, [new.strip()])
+                        done += 1
+                if done:
+                    notes.append("Main text simplified (%d of %d boxes)" % (done, len(boxes)))
+            else:
+                notes.append("The slide's text boxes changed; body not changed")
+        elif ch.get("body") is not None:
             body = find_body(slide, title)
             if body is not None and ch["body"]:
                 if [x.strip() for x in ch["body"]] != _text_of(body):

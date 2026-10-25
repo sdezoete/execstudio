@@ -97,7 +97,9 @@ def storyline(brief, version, context, invented=None):
     user = _brief_block(brief, context)
     if invented:
         user += ("\n\nYOUR PREVIOUS ANSWER WAS REJECTED: it used figures that are not in the brief or the material ("
-                 + ", ".join(invented) + "). Replace every one of them with a [placeholder], or leave it out.")
+                 + ", ".join(invented) + "). Replace only those figures with a [placeholder], or leave them out. Keep "
+                 "every other figure from the brief and the material exactly as before: do not turn correct figures "
+                 "into placeholders.")
     return system, user
 
 
@@ -131,6 +133,9 @@ def transform(slides, actions, brief, feedback=None):
         "body text, write its title from data: state what the values show, using the numbers exactly as "
         "given (for example 'Online sales rose to EUR 34.5m in Q2'). Never compute new figures.\n"
         "- cover: true marks a title slide; keep its title as it is.\n"
+        "- boxes: true marks a slide whose points each sit in a text box of their own. For such a slide, return "
+        "body with exactly as many items as given, in the same order, each one shortened on its own (20 words "
+        "or fewer, every number and name kept). Never merge, split, reorder or drop items.\n"
         "- Never add facts or numbers that are not on the slide. Keep the slide's language.\n"
         "- Never write placeholders such as 'Evidence needed', 'TBD' or '[Add content]'. If a slide has "
         "too little text to improve, keep its title and body as they are.\n"

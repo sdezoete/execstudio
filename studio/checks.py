@@ -10,8 +10,7 @@ MAX_HEADLINE_WORDS = 15
 MIN_HEADLINE_WORDS = 5   # shorter reads as a topic label ("KPIs"), not a finding
 TOPIC_LABEL = re.compile(r"^(overview|update|summary|introduction|agenda|review|background)\b", re.I)
 
-_NUM = re.compile(r"\d+(?:[.,]\d+)*")
-_WORD = re.compile(r"[^\W\d_][\w&'-]*", re.UNICODE)
+_WORD =re.compile(r"[^\W\d_][\w&'-]*", re.UNICODE)
 _PLACEHOLDER = re.compile(r"^\W*(evidence needed|add (content|source)|tbd|tbc|n/?a|lorem ipsum|placeholder)\b", re.I)
 
 
@@ -20,7 +19,9 @@ def _norm_num(s):
 
 
 _AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹٫٬", "01234567890123456789.,")
-_NUM_ASCII = re.compile(r"[0-9]+(?:[.,][0-9]+)*")
+# a thousands comma is always followed by exactly three digits: "1,800" is one number, but the CSV row
+# "48200000,51000000" is two (round 8 W-03 read them as one, so file figures looked invented)
+_NUM_ASCII = re.compile(r"[0-9]{1,3}(?:,[0-9]{3})+(?![0-9])(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?")
 
 
 def numbers(text):
@@ -134,6 +135,10 @@ def direction_problem(original_lines, title):
     return "says they are all %s target, but the figures say: %s" % (claimed, facts)
 
 
+# content that satisfies PRES-09 (Political Risk Framework for OOK investments)
+POLITICAL_RISK = re.compile(r"political risk|political framework|\bPRF\b|country risk|sovereign risk|geopolitic|"
+                            r"المخاطر السياسية|المخاطر الجيوسياسية|إطار المخاطر السياسية", re.I)
+
 _ASK_VERB = re.compile(r"^\W*(approve|endorse|decide|authori[sz]e|fund|agree|sign off|note(?!\s*:)|for (information|noting|guidance|approval|decision)|"
                        r"we (ask|seek|request)|(gec|gic|the committee) (is asked|to approve|to note))\b", re.I)
 
@@ -164,13 +169,20 @@ def _derivable(source):
     """The brief's figures plus what simple arithmetic on two of them gives: the EUR 2.8m miss (51.0 - 48.2)
     and 2 x EUR 70k = EUR 140k are faithful, not invented."""
     vals = sorted({float(n) for n in source if n.replace(".", "", 1).isdigit()})[:80]
-    out = set()
+    out, ratios = set(), set()
     for i, a in enumerate(vals):
         for b in vals[i:]:
             out.update((a + b, abs(a - b)))
             if any(x.is_integer() and 2 <= x <= 100 for x in (a, b)):  # a count times an amount, not 0.9 x 0.9
                 out.add(a * b)
-    return set(vals), out
+            # percentage changes and shares: 48.2 vs 51.0 is a 5.5% miss, 34.5 vs 30.1 a 14.6% gain (round 8)
+            for x, y in ((a, b), (b, a)):
+                if y:
+                    ratios.update((abs(x - y) / y * 100, x / y * 100))
+    # spreadsheet cells hold raw values: 0.314 shows as 31.4%, 48200000 as 48.2m (round 8 W-03); matched
+    # relatively only, or 410 x 0.001 would let an invented "0.4" through
+    scaled = {x * f for x in set(vals) | out for f in (100, 1e-3, 1e-6, 1e-9)}
+    return set(vals), out, scaled, ratios
 
 
 def _is_year(v):
@@ -180,7 +192,7 @@ def _is_year(v):
 def _unsourced(figures, allowed):
     """Figures not in `allowed` (within rounding). Whole numbers up to 12 are exempt: quarters, step numbers
     and small counts ("Q1", "3 priorities") are not the figures this guards."""
-    given, derived = allowed
+    given, derived, scaled, ratios = allowed
     out = []
     for n in figures:
         try:
@@ -193,7 +205,10 @@ def _unsourced(figures, allowed):
             ok = v in given
         else:
             ok = (any(abs(v - a) <= max(0.051, 0.005 * a) for a in given)
-                  or any(abs(v - a) <= max(0.051, 0.002 * a) for a in derived))
+                  or any(abs(v - a) <= max(0.051, 0.002 * a) for a in derived)
+                  or any(abs(v - a) <= 0.006 * a for a in scaled)
+                  # a computed percentage carries a decimal (5.5%, 14.6%); a whole "15 stores" never matches one
+                  or ("." in n and any(abs(v - a) <= 0.051 for a in ratios)))
         if not ok:
             out.append(n)
     return sorted(out, key=float)
@@ -213,7 +228,7 @@ def flag_invented(slides, source):
         extra = _unsourced(_slide_figures(s), allowed)
         if extra:
             s["evidence"] = {"status": "needed", "source": "",
-                             "gap": ("Check figures not in your facts: " + ", ".join(extra[:5]))[:120]}
+                             "gap": ("Check figures not in your facts or files: " + ", ".join(extra[:5]))[:120]}
 
 
 def rewrite_problem(original, rewrite):
@@ -228,9 +243,15 @@ def rewrite_problem(original, rewrite):
     if rewrite.get("body") is not None:
         if not rewrite["body"] and original.get("body"):
             return "deleted the main text"
-        if any(is_placeholder(x) for x in rewrite["body"]):
+        if original.get("boxes"):  # one point per text box: rewrite each box where it stands
+            if len(rewrite["body"]) != len(original.get("body") or []):
+                return "returned %d items for %d text boxes; return exactly one per box, in order" % (
+                    len(rewrite["body"]), len(original.get("body") or []))
+            if any(not x.strip() for x in rewrite["body"]):
+                return "emptied a text box"
+        if any(x.strip() and is_placeholder(x) for x in rewrite["body"]):
             return "put placeholder text in the main text"
-        if len(rewrite["body"]) > MAX_POINTS:
+        if len(rewrite["body"]) > MAX_POINTS and not original.get("boxes"):
             return "returned %d points; the maximum is %d (combine points, keep every number)" % (len(rewrite["body"]), MAX_POINTS)
         new_flat = _squash(" ".join(rewrite["body"]))
         old_flat = _squash(" ".join(original.get("body") or []))

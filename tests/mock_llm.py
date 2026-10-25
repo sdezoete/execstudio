@@ -152,7 +152,8 @@ class H(BaseHTTPRequestHandler):
             slides = json.loads(req["messages"][1]["content"].split("SLIDES\n", 1)[1].split("\n\nYOUR PREVIOUS", 1)[0])
             TRANSFORM_CALLS.append([x["index"] for x in slides])
             out = {"slides": [{"index": x["index"], "title": (x["title"] + ": the key finding")[:120],
-                               "body": _simplify(x["body"]) if "Simplify" in system else None,
+                               "body": ([b.replace(" currently", "") for b in x["body"]] if x.get("boxes") else _simplify(x["body"]))
+                               if "Simplify" in system else None,
                                "change": "Headline rewritten"} for x in slides]}
         elif "Compliance Reviewer" in system:
             # an over-generous reviewer: passes everything and quotes the brief (test report D-02)

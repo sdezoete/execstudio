@@ -244,6 +244,17 @@ class WithLLM(Base):
         self.post("/api/storyline", {"brief": BRIEF, "version": "full"})
         self.assertEqual(len(mock_llm.STORY_CALLS), 1)                      # a faithful answer is not re-asked
 
+    def test_uploaded_file_figures_not_flagged(self):  # round 8 W-03
+        from studio.checks import invented_figures, numbers
+        self.assertEqual(sorted(numbers("Revenue,48200000,51000000")), ["48200000", "51000000"])  # two cells, not one number
+        self.assertEqual(numbers("1,800 parcels"), {"1800"})
+        files = ("Sheet: Q3\nMetric,Actual,Plan\nRevenue,48200000,51000000\nGross margin,0.314,0.335\n"
+                 "Online,34.499999999999996,30.1\nregion,sales\nNorth,71200000")
+        slide = {"headline": "Revenue EUR 48.2m vs plan EUR 51.0m, a EUR 2.8m miss",
+                 "body": ["Gross margin 31.4% vs 33.5%", "Online EUR 34.5m", "North EUR 71.2m"], "notes": ""}
+        self.assertEqual(invented_figures([slide], numbers(files)), [])
+        self.assertEqual(invented_figures([dict(slide, body=["Pilot in 15 stores", "Revenue EUR 52.7m"])], numbers(files)), ["15", "52.7"])
+
     def test_round6_arabic_offset_chart(self):
         from studio.review import _sum_problem
         from studio import schema
@@ -577,6 +588,26 @@ class Decks(Base):
         self.assertEqual(len(paras), len(set(paras)), paras)                  # each tile's text once
         self.assertNotIn("Main text simplified", " ".join(r["report"][0]["changes"]))
 
+    def test_simplify_alone_on_exported_deck(self):  # round 8 W-02: "Simplify" on its own did nothing
+        wordy = ["Our on-time delivery is currently at 91% versus the 95% target we agreed", "Warehouse B is currently reaching 97% on-time this quarter",
+                 "The Carrier X contract is currently running until March 2027 as signed", "The fuel surcharge is currently up 6% on the previous quarter"]
+        slides = [{"kind": "title", "headline": "Logistics update", "body": ["Operations"]},
+                  {"kind": "summary", "headline": "Overview", "body": wordy},
+                  {"kind": "kpi", "headline": "KPIs", "body": ["On-time 91% vs 95%", "Cost per parcel EUR 4.10 vs 3.90", "Damage rate 0.8% vs 0.5%"]}]
+        st, _, exported = self.post("/api/export/pptx", {"brief": BRIEF, "title": "Logistics update", "slides": slides})
+        d = json.loads(self.post("/api/deck/upload", raw=exported, headers={"X-Filename": "G.pptx"})[2])
+        r = json.loads(self.post("/api/deck/transform", {"deck_id": d["deck_id"], "selected": [2, 3],
+                                 "actions": {"simplify": True}, "brief": BRIEF})[2])
+        self.assertIn("Main text simplified (4 of 4 boxes)", r["report"][0]["changes"], r["report"])
+        prs = self._open(r["file_id"])
+        text = " ".join(sh.text_frame.text for sh in prs.slides[1].shapes if sh.has_text_frame)
+        self.assertNotIn("currently", text)                                   # each box simplified where it stands
+        for fact in ("91%", "95%", "97%", "March 2027", "6%"):
+            self.assertIn(fact, text)
+        self.assertEqual(len(prs.slides), 3)                                  # in place: all slides kept
+        kpi = " ".join(sh.text_frame.text for sh in prs.slides[2].shapes if sh.has_text_frame)
+        self.assertIn("Cost per parcel EUR 4.10 vs 3.90", kpi)                # short KPI lines left alone
+
     def test_transform_title_direction_checked(self):  # N-03
         from studio.checks import rewrite_problem
         original = {"title": "KPIs", "body": ["On-time 91% vs 95%", "Cost per parcel EUR 4.10 vs 3.90", "Damage rate 0.8% vs 0.5%"]}
@@ -626,6 +657,29 @@ class Decks(Base):
         self.assertNotIn("not board-ready", r["summary"].lower())
         self.assertNotIn("critical PRES-07", r["summary"])
         self.assertIn("Message titles are crisp.", r["summary"])               # the model's other sentences stay
+
+    def test_board_context_decides_applicability(self):  # round 8 W-01, and the stage gate
+        slides = [{"kind": "summary", "headline": "Approve SAR 410m to acquire Muscat Logistics", "body": ["IRR 13%"]},
+                  {"kind": "decision", "headline": "Approve SAR 410m for the acquisition", "body": ["Close in Q2 2027"]}]
+        def run(ctx, extra=None):
+            r = json.loads(self.post("/api/board-assessment", {"brief": BRIEF, "slides": slides + (extra or []), "context": ctx})[2])
+            return {c["id"]: c for c in r["compliance"]}, r
+        c, r = run({"ook_investment": "yes", "presentation_type": "transaction", "stage_gate": "gate2"})
+        self.assertEqual(c["PRES-09"]["result"], "FAIL")                       # OOK yes, no Political Risk Framework
+        self.assertEqual(c["COMP-09"]["result"], "NOT VERIFIABLE")
+        self.assertEqual(c["COMP-08"]["result"], "NOT VERIFIABLE")
+        self.assertIn("Gate II", c["COMP-08"]["evidence"])                     # the gate chosen is named
+        self.assertEqual(c["COMP-07"]["result"], "NOT APPLICABLE")
+        self.assertIn("PRES-09", r["summary"])                                 # listed as still to fix
+        prf = [{"kind": "risk", "headline": "Oman political risk is moderate under the Political Risk Framework", "body": ["Sanctions exposure low"]}]
+        c, _ = run({"ook_investment": "yes"}, prf)
+        self.assertEqual(c["PRES-09"]["result"], "PASS")
+        self.assertIn("slide 3", c["PRES-09"]["evidence"])
+        c, _ = run({"ook_investment": "no", "presentation_type": "cms", "stage_gate": "gate3"})
+        self.assertEqual(c["PRES-09"]["result"], "NOT APPLICABLE")
+        self.assertEqual(c["COMP-07"]["result"], "NOT VERIFIABLE")             # CMS chosen: never "not a capital program item"
+        self.assertIn("Gate III", c["COMP-07"]["evidence"])
+        self.assertEqual(c["COMP-08"]["result"], "NOT APPLICABLE")
 
     def test_board_pres03_decided_from_slides(self):  # round 6/7: PRES-03 failed by mistake ~1 run in 10
         from studio.services import _enforce_opening_ask

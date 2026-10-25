@@ -13,8 +13,8 @@ from pathlib import Path
 
 from . import __version__, catalog, fallback, prompts, review, schema
 from . import slides as slide_engine
-from .checks import (MAX_HEADLINE_WORDS, clean_storyline, flag_invented, headline_problem, invented_figures,
-                     missing_facts, numbers, rewrite_problem, slides_stating_ask)
+from .checks import (MAX_HEADLINE_WORDS, POLITICAL_RISK, clean_storyline, flag_invented, headline_problem,
+                     invented_figures, missing_facts, numbers, rewrite_problem, slides_stating_ask)
 from .config import ROOT
 from .extract import PDF_SUPPORTED, ExtractError, extract
 from .llm import LLMClient, LLMError
@@ -186,6 +186,7 @@ class Studio:
         result, meta = self._ai("board_assessment", call, lambda: fallback.board_assessment(b, slides, ctx), b)
         _enforce_decision_slide(result, slides, b["decision"])
         _enforce_opening_ask(result, slides, b["decision"])
+        _apply_context(result, slides, ctx)
         result["compliance"].insert(0, _sub01(ctx))
         result["readiness"] = _readiness(result)
         result["summary"] = _settle_summary(result)
@@ -408,10 +409,13 @@ class Studio:
                 if idx not in valid:
                     continue
                 body = item.get("body") if actions["simplify"] and isinstance(item.get("body"), list) else None
-                if len(by_index[idx]["body"]) <= 2:
+                boxes = bool(by_index[idx].get("boxes"))
+                if len(by_index[idx]["body"]) <= 2 and not boxes:
                     body = None  # one or two lines (a KPI tile, a caption): nothing to simplify
                 got[idx] = {"title": str(item.get("title") or "").strip()[:300] if actions["headlines"] else "",
-                            "body": [str(x).strip()[:400] for x in body if str(x).strip()] if body else None}
+                            "body": [str(x).strip()[:400] for x in body] if body else None, "boxes": boxes}
+                if got[idx]["body"] is not None and not boxes:
+                    got[idx]["body"] = [x for x in got[idx]["body"] if x]
             return got
 
         def call():
@@ -555,6 +559,11 @@ def _praises(sentence):
     return any(not _NEGATED.search(sentence[:m.start()]) for m in _PRAISE.finditer(sentence))
 
 
+def _lower_first(text):
+    """"Presentation includes…" -> "presentation includes…", but "OOK investments…" stays as it is."""
+    return text[:1].lower() + text[1:] if text[1:2].islower() else text
+
+
 def _settle_summary(result):
     """The summary as the final word, written after the critical checks and the cap. The model writes its
     summary before PRES-08 is enforced and the score capped, so it can call a failing deck "highly ready"
@@ -569,7 +578,7 @@ def _settle_summary(result):
         open_items = [c for c in result["compliance"] if not c.get("critical") and c["result"] in ("FAIL", "WARNING")]
         verdict = "Board-ready: no critical check fails."
         if open_items:
-            verdict += " Still to fix: %s." % "; ".join("%s (%s)" % (c["id"], c["requirement"][:1].lower() + c["requirement"][1:].rstrip("."))
+            verdict += " Still to fix: %s." % "; ".join("%s (%s)" % (c["id"], _lower_first(c["requirement"]).rstrip("."))
                                                        for c in open_items[:4])
         keep = [x for x in sentences if not _READY_CLAIM.search(x) and not _CRITICAL_CLAIM.search(x)]
         result["verdict"], result["summary_detail"] = verdict, " ".join(keep)
@@ -588,6 +597,53 @@ def _settle_summary(result):
     # the page shows the verdict in its banner, so it also gets the two halves (no verdict twice in a row)
     result["verdict"], result["summary_detail"] = verdict, " ".join(keep)
     return " ".join([verdict] + keep)
+
+
+def _apply_context(result, slides, ctx):
+    """Which checklist items apply follows from the context the user chose, not from the model's reading of
+    the deck (round 8 W-01: with OOK = Yes, PRES-09 came back "Not applicable" while its own evidence said
+    the Political Risk Framework was missing; with CMS chosen, COMP-07 said "not a capital program item").
+    - OOK yes: PRES-09 is PASS when the slides carry Political Risk Framework content, otherwise FAIL;
+      COMP-09 is NOT VERIFIABLE (a consultation). OOK no: both NOT APPLICABLE.
+    - Presentation type: COMP-07 (CMS gates) applies to CMS, COMP-08 (transaction gates) to transactions;
+      the other is NOT APPLICABLE. Gate requirements are paperwork, so an applicable item is NOT VERIFIABLE,
+      and its wording names the stage gate chosen."""
+    by_id = {c["id"]: c for c in result["compliance"]}
+    text = " ".join(" ".join([s.get("headline", "")] + list(s.get("body") or [])) for s in slides)
+    ook, ptype, gate = ctx.get("ook_investment"), ctx.get("presentation_type"), ctx.get("stage_gate")
+    gate_name = catalog.STAGE_GATES.get(gate, "") if gate and gate != "na" else ""
+
+    def put(cid, result_, evidence, action=""):
+        if cid in by_id:
+            by_id[cid].update(result=result_, evidence=evidence, action=action)
+
+    if ook == "yes":
+        found = [i for i, s in enumerate(slides, 1)
+                 if POLITICAL_RISK.search(" ".join([s.get("headline", "")] + list(s.get("body") or [])))]
+        if found:
+            put("PRES-09", "PASS", "OOK investment: Political Risk Framework content on slide%s %s."
+                % ("s" if len(found) > 1 else "", ", ".join(map(str, found))))
+        else:
+            put("PRES-09", "FAIL", "OOK investment, but no slide presents the Political Risk Framework.",
+                "Add the Political Risk Framework assessment for the host country.")
+        put("COMP-09", "NOT VERIFIABLE", "OOK investment: the Investment Guidelines Group consultation cannot be confirmed from the deck.",
+            "Confirm the consultation on the political framework separately.")
+    elif ook == "no":
+        put("PRES-09", "NOT APPLICABLE", "Not an OOK investment (set in the context).")
+        put("COMP-09", "NOT APPLICABLE", "Not an OOK investment (set in the context).")
+
+    gate_txt = (" for %s" % gate_name) if gate_name else ""
+    if ptype == "cms":
+        put("COMP-07", "NOT VERIFIABLE", "CMS item: the CMS gate requirements%s cannot be confirmed from the deck." % gate_txt,
+            "Confirm the CMS gate%s package separately." % gate_txt)
+        put("COMP-08", "NOT APPLICABLE", "Not a transaction item (CMS selected in the context).")
+    elif ptype == "transaction":
+        put("COMP-08", "NOT VERIFIABLE", "Transaction item: NBD consultation and GI-30.001 gate requirements%s cannot be "
+            "confirmed from the deck." % gate_txt, "Confirm the NBD consultation and gate%s requirements separately." % gate_txt)
+        put("COMP-07", "NOT APPLICABLE", "Not a Capital Program item (transaction selected in the context).")
+    elif ptype == "other":
+        put("COMP-07", "NOT APPLICABLE", "Not a Capital Program item (Other selected in the context).")
+        put("COMP-08", "NOT APPLICABLE", "Not a transaction item (Other selected in the context).")
 
 
 def _enforce_opening_ask(result, slides, decision):

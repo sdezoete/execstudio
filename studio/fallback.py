@@ -6,6 +6,7 @@ They never invent facts: they produce a well-structured skeleton with
 import re
 
 from .catalog import AUDIENCE_BY_ID, BOARD_READINESS_DIMENSIONS, BOARD_RULES, KINDS
+from .checks import POLITICAL_RISK
 
 
 def _ev(gap=""):
@@ -168,7 +169,7 @@ def kind_name(kind):
 # --------------------------------------------------------------------- GEC/GIC board assessment
 _WEAK_TITLE = re.compile(r"^(overview|update|summary|introduction|agenda|review|background|status|analysis)\b", re.I)
 _AGENDA_LIKE = re.compile(r"agenda|background|introduction", re.I)
-_POLITICAL_RISK = re.compile(r"political risk", re.I)
+_POLITICAL_RISK = POLITICAL_RISK
 
 
 def _nums(items):
