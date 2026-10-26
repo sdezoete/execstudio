@@ -207,6 +207,10 @@ class WithLLM(Base):
                                                       "Raw materials added 1.2 points to the decline"]),
             s("summary", "EBIT fell EUR 10.0m", ["Lower volume reduced EBIT by EUR 5.0m", "Price cut EBIT by EUR 3.0m", "Costs reduced EBIT by EUR 2.0m"]),
             s("kpi", "KPIs year on year", ["Margin -2.1 pts YoY", "Churn +0.6 pts YoY", "NPS -3 pts YoY"]),
+            # demo case: "combined" cost next to separate, larger figures is not a breakdown
+            s("bars", "The first wave fits within the USD 15m envelope", ["Indicative annual benefit of USD 6.0m",
+                                                                         "Their combined implementation cost is USD 4.5m",
+                                                                         "The full programme request is USD 15.0m"]),
             # round 5: actions on something else are not parts of the total
             s("summary", "Q3 revenue update", ["Revenue fell EUR 4.0m", "We cut costs by EUR 1.5m", "We raised prices, adding EUR 0.5m"]),
             s("summary", "Q3 revenue update", ["Revenue fell EUR 4.0m", "We cut costs by EUR 1.5m", "We raised prices by EUR 0.5m"]),
@@ -244,6 +248,28 @@ class WithLLM(Base):
         self.post("/api/storyline", {"brief": BRIEF, "version": "full"})
         self.assertEqual(len(mock_llm.STORY_CALLS), 1)                      # a faithful answer is not re-asked
 
+    def test_excel_cells_read_as_shown_and_large_sources(self):  # demo case: raw 0.2121... and false year flags
+        from studio.checks import invented_figures, numbers
+        from studio.extract import extract
+        f = ROOT / "examples" / "files" / "q3_figures.xlsx"
+        text = extract(f.name, f.read_bytes())
+        self.assertIn("Gross margin,31.4%,33.5%", text)                         # percentage style shown as Excel shows it
+        self.assertNotRegex(text, r"\d\.\d{5,}")                                # no float noise
+        big = " ".join(str(100 + k * 7) for k in range(400)) + " deliver by 2027 - H1 2028, weekly users 428"
+        slide = {"headline": "Deliver four implementations in 2027 and H1 2028", "body": ["Weekly active users: 428"], "notes": ""}
+        self.assertEqual(invented_figures([slide], numbers(big)), [])          # years and figures beyond the first 80 count
+
+    def test_context_budget_shared_between_files(self):  # demo case: a long PDF crowded out the workbook
+        from studio import config
+        from studio.services import Studio
+        studio = Studio(dict(config.load(), max_context_chars=40000))
+        pdf, xls = "### report.pdf\n" + "P" * 63000, "### baseline.xlsx\n" + "X" * 11400
+        ctx = studio._context({"facts": "F" * 500}, pdf + "\n\n" + xls)
+        self.assertIn("F" * 500, ctx)                                          # typed facts always in full
+        self.assertIn("X" * 11400, ctx)                                        # the small workbook whole, though second
+        self.assertIn("rest of this file omitted", ctx)                        # the long PDF trimmed, visibly
+        self.assertLessEqual(len(ctx), 40000 + 100)
+
     def test_uploaded_file_figures_not_flagged(self):  # round 8 W-03
         from studio.checks import invented_figures, numbers
         self.assertEqual(sorted(numbers("Revenue,48200000,51000000")), ["48200000", "51000000"])  # two cells, not one number
@@ -274,6 +300,17 @@ class WithLLM(Base):
         ch = schema.chart({"categories": ["Q1", "Q2"], "series": [{"name": "Revenue (SAR m)", "values": [48.2, 51]},
                                                                   {"name": "Gross margin %", "values": [31.4, 33.5]}]})
         self.assertEqual([x["name"] for x in ch["series"]], ["Revenue (SAR m)"])
+
+    def test_export_every_layout(self):  # the matrix layout broke export (found running the demo case)
+        from pptx import Presentation
+        from studio.catalog import KINDS
+        for lang, head, body in (("en", "Option B gives the best value for acceptable risk", ["Option A: low cost", "Option B: best value",
+                                                                                              "Option C: fastest", "Recommend Option B"]),
+                                 ("ar", "الخيار ب يحقق أفضل قيمة بمخاطر مقبولة", ["الخيار أ: تكلفة منخفضة", "الخيار ب: أفضل قيمة", "الخيار ج: الأسرع"])):
+            slides = [{"kind": k, "headline": head, "body": body, "evidence": {"status": "needed", "gap": "Add data"}} for k in KINDS]
+            st, _, data = self.post("/api/export/pptx", {"brief": BRIEF, "title": "All layouts", "slides": slides})
+            self.assertEqual(st, 200, (lang, data[:300]))
+            self.assertEqual(len(Presentation(io.BytesIO(data)).slides), len(KINDS))
 
     def test_arabic_export_labels_and_filename(self):  # round 6: English labels and "____2026" names
         from pptx import Presentation

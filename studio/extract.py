@@ -140,6 +140,39 @@ def _col_index(ref):
     return n - 1
 
 
+def _percent_styles(zf, names):
+    """{cell style index: decimals} for styles whose number format shows a percentage ("0.0%", built-in 9
+    and 10). Cells store the raw fraction, 0.212121..., which Excel shows as 21.2%."""
+    if "xl/styles.xml" not in names:
+        return {}
+    root = _xml(zf, "xl/styles.xml")
+    codes = {"9": "0%", "10": "0.00%"}
+    for nf in root.iter("{%s}numFmt" % NS["s"]):
+        codes[nf.get("numFmtId")] = nf.get("formatCode") or ""
+    out = {}
+    xfs = root.find("{%s}cellXfs" % NS["s"])
+    for i, xf in enumerate(xfs if xfs is not None else []):
+        code = codes.get(xf.get("numFmtId"), "").split(";")[0]
+        if "%" in code:
+            m = re.search(r"\.(0+)", code)
+            out[str(i)] = len(m.group(1)) if m else 0
+    return out
+
+
+def _cell_number(raw, percent_decimals=None):
+    """A numeric cell as Excel shows it: "21.2%" for a percentage style, otherwise without float noise
+    (1.14285714285714 -> 1.14, 34.499999999999996 -> 34.5), so slides never copy raw cell values."""
+    try:
+        v = float(raw)
+    except ValueError:
+        return raw
+    if percent_decimals is not None:
+        return "%.*f%%" % (max(percent_decimals, 1), v * 100)
+    if v.is_integer():
+        return str(int(v))
+    return ("%.2f" % v if abs(v) < 100 else "%.1f" % v).rstrip("0").rstrip(".")
+
+
 def _xlsx(zf):
     names = zf.namelist()
     shared = []
@@ -161,6 +194,7 @@ def _xlsx(zf):
                 target = "xl/" + target
             sheets.append((sh.get("name"), target))
 
+    percent_decimals = _percent_styles(zf, names)
     out = []
     for title, path in sheets:
         if path not in names:
@@ -178,6 +212,8 @@ def _xlsx(zf):
                     val = "".join(x.text or "" for x in c.iter("{%s}t" % NS["s"]))
                 else:
                     val = v.text if v is not None and v.text is not None else ""
+                    if val and t in (None, "n"):
+                        val = _cell_number(val, percent_decimals.get(c.get("s")))
                 if val != "":
                     cells[_col_index(c.get("r"))] = val
             if cells:

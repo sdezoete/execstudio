@@ -72,16 +72,21 @@ class Studio:
         return result, meta
 
     def _context(self, brief, uploaded):
-        parts = []
-        if brief.get("facts"):
-            parts.append("### Key facts provided by the presenter\n" + brief["facts"])
-        if uploaded:
-            parts.append(uploaded)
-        text = "\n\n".join(parts)
+        """Key facts in full, then the uploaded files within max_context_chars. The budget is shared: each
+        file gets an equal share, and what a small file does not use goes to the larger ones. Cutting the
+        joined text at the limit instead dropped every file after a long one (the demo case: a 63,000-
+        character PDF left no room for the company's own workbook, uploaded second)."""
+        facts = ("### Key facts provided by the presenter\n" + brief["facts"]) if brief.get("facts") else ""
         limit = int(self.cfg["max_context_chars"])
-        if len(text) > limit:
-            text = text[:limit] + "\n[...remaining material omitted for length]"
-        return text
+        files = [f for f in re.split(r"(?m)^(?=### )", uploaded or "") if f.strip()]
+        budget = max(0, limit - len(facts))
+        shares, left = {}, budget
+        for k, i in enumerate(sorted(range(len(files)), key=lambda i: len(files[i]))):
+            shares[i] = min(len(files[i]), left // (len(files) - k))
+            left -= shares[i]
+        kept = [f if shares[i] >= len(f) else f[:shares[i]].rstrip() + "\n[...rest of this file omitted for length]"
+                for i, f in enumerate(files) if shares[i] > 0]
+        return "\n\n".join(x for x in [facts] + [k.strip() for k in kept] if x)
 
     # ------------------------------------------------------------ endpoints
     def meta(self):

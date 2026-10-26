@@ -262,6 +262,12 @@ def _sum_problem(slide):
                       and not _TOTAL.search(b) and not (_CHANGE.search(b) and not _contributes(b, total_line))
                       and not _acts_on_other(b, total_line) and not any(_close(x, value) for x, _u in _qty(b, unit))]
         parts = [p + (bool(_OFFSET.search(b)),) for b in part_lines for p in _parts(b, unit)]
+        # a single unsigned "part" bigger than the total is not a part of it ("combined cost USD 4.5m" next to
+        # "programme request USD 15.0m"): these are separate figures, not a breakdown (demo case)
+        # (in a bridge with an offset or signed parts, one part can exceed the total: 15 + 6 - 9 = 12)
+        nets_off = any(o or explicit for _v, explicit, o in parts)
+        if not nets_off and any(abs(v) > value * 1.01 for v, _e, _o in parts):
+            parts = []
         if len(parts) >= 2:
             signs = {v > 0 for v, explicit, _o in parts if explicit}
             if any(o for _v, _e, o in parts):

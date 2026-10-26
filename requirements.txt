@@ -2,7 +2,8 @@
 #   python-pptx:  corporate .potx/.pptx templates, native charts, editing existing decks
 #   pypdf:        reading PDF uploads
 #   cryptography: HTTPS with .pfx certificate files (PEM files work without it)
-# Tested on Python 3.11 with: python-pptx 1.0.2, pypdf 5.9, cryptography 46.0, lxml 6.1, Pillow 13.0.
+# Tested on Python 3.11 with: python-pptx 1.0.2, pypdf 5.9, cryptography 46.0, lxml 6.1, Pillow 13.0,
+# XlsxWriter 3.3, typing_extensions 4.16, cffi 2.1, pycparser 3.11 (the 9 wheels in wheels\; see DEPLOY.md).
 python-pptx==1.0.2
 pypdf>=5.1,<6
 cryptography>=42,<47

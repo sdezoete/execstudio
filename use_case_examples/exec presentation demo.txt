@@ -1,0 +1,6 @@
+exec presentation demo:
+
+1. Choose “Generate a new presentation”, audience Executive, template Board Pack.
+2. Upload the PDF and the workbook as content source files.
+3. Use the topic “Enterprise AI programme for Horizon Industrial Group” and 
+	the decision “Approve USD 15m to upgrade AI infrastructure, define priority use cases and deliver four first implementations, 2027 – H1 2028”.

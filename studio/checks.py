@@ -4,6 +4,7 @@ The LLM is good at rewriting and bad at noticing what it dropped, so these are
 deterministic and conservative: when in doubt they reject, and the caller keeps
 the original text.
 """
+import bisect
 import re
 
 MAX_HEADLINE_WORDS = 15
@@ -167,11 +168,15 @@ def _slide_figures(slide):
 
 def _derivable(source):
     """The brief's figures plus what simple arithmetic on two of them gives: the EUR 2.8m miss (51.0 - 48.2)
-    and 2 x EUR 70k = EUR 140k are faithful, not invented."""
-    vals = sorted({float(n) for n in source if n.replace(".", "", 1).isdigit()})[:80]
+    and 2 x EUR 70k = EUR 140k are faithful, not invented. Returns sorted lists for fast lookup."""
+    vals = sorted({float(n) for n in source if n.replace(".", "", 1).isdigit()})
+    # every figure counts as given; pairs only over at most 300 of them, spread across the range, so a large
+    # workbook stays fast (keeping only the 80 smallest made its years and larger figures look invented)
+    step = max(1, len(vals) // 300)
+    base = vals[::step]
     out, ratios = set(), set()
-    for i, a in enumerate(vals):
-        for b in vals[i:]:
+    for i, a in enumerate(base):
+        for b in base[i:]:
             out.update((a + b, abs(a - b)))
             if any(x.is_integer() and 2 <= x <= 100 for x in (a, b)):  # a count times an amount, not 0.9 x 0.9
                 out.add(a * b)
@@ -182,7 +187,13 @@ def _derivable(source):
     # spreadsheet cells hold raw values: 0.314 shows as 31.4%, 48200000 as 48.2m (round 8 W-03); matched
     # relatively only, or 410 x 0.001 would let an invented "0.4" through
     scaled = {x * f for x in set(vals) | out for f in (100, 1e-3, 1e-6, 1e-9)}
-    return set(vals), out, scaled, ratios
+    return vals, sorted(out), sorted(scaled), sorted(ratios)
+
+
+def _near(sorted_vals, v, tol):
+    """True when some value in sorted_vals lies within tol of v."""
+    i = bisect.bisect_left(sorted_vals, v - tol)
+    return i < len(sorted_vals) and sorted_vals[i] <= v + tol
 
 
 def _is_year(v):
@@ -202,13 +213,13 @@ def _unsourced(figures, allowed):
         if v.is_integer() and v <= 12:
             continue
         if _is_year(v):  # a year is given or invented, never derived ("March 2028")
-            ok = v in given
+            ok = _near(given, v, 0)
         else:
-            ok = (any(abs(v - a) <= max(0.051, 0.005 * a) for a in given)
-                  or any(abs(v - a) <= max(0.051, 0.002 * a) for a in derived)
-                  or any(abs(v - a) <= 0.006 * a for a in scaled)
+            ok = (_near(given, v, max(0.051, 0.005 * v))
+                  or _near(derived, v, max(0.051, 0.002 * v))
+                  or _near(scaled, v, 0.006 * v)
                   # a computed percentage carries a decimal (5.5%, 14.6%); a whole "15 stores" never matches one
-                  or ("." in n and any(abs(v - a) <= 0.051 for a in ratios)))
+                  or ("." in n and _near(ratios, v, 0.051)))
         if not ok:
             out.append(n)
     return sorted(out, key=float)

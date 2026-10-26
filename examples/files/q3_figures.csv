@@ -1,0 +1,10 @@
+metric,actual,plan
+revenue_sar,48200000,51000000
+gross_margin,0.314,0.335
+online_sales_sar,34500000,30100000
+churn,0.041,0.035
+
+region,sales_sar
+Central,71200000
+Eastern,63900000
+Western,49500000

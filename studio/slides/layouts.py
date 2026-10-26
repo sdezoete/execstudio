@@ -149,9 +149,9 @@ def lay_matrix(c, s, area):
     qw, qh = (gw - 0.15) / 2, (gh - 0.15) / 2
     for i, (col, r) in enumerate([(0, 0), (1, 0), (0, 1), (1, 1)]):
         x, y = gx + col * (qw + 0.15), ay + r * (qh + 0.15)
-        label = its[i] if i < len(its) else ""
-        hi = bool(label) and i == rec
-        c.text(x, y, qw, qh, label, size=16, bold=hi, color=c.colors["white"] if hi else c.colors["ink"],
+        cell = its[i] if i < len(its) else ""
+        hi = bool(cell) and i == rec
+        c.text(x, y, qw, qh, cell, size=16, bold=hi, color=c.colors["white"] if hi else c.colors["ink"],
                fill=c.colors["accent"] if hi else c.colors["tile"], anchor="ctr", inset=0.15)
     c.text(ax, ay, 0.85, gh, [label(s, "Value"), "↑"], size=11, color=c.colors["muted"], align="ctr", anchor="ctr")
     c.text(gx, ay + gh + 0.05, gw, 0.35, label(s, "Risk and effort →"), size=11, color=c.colors["muted"], align="ctr")
