@@ -60,7 +60,7 @@ LLM_MAX_TOKENS=4096
 
 ## 5. HTTPS, start and autostart
 
-1. **Certificate:** from an Administrator PowerShell, run `scripts\export-cert-from-store.ps1`. It writes `certs\server.pfx`, which `config.json` already points to. See the README's HTTPS section for PEM files.
+1. **Certificate:** `config.json` points at the server's PEM files, `D:\ssl_certificate\certificate.crt` and `D:\ssl_certificate\privatekey.pem`, so there is nothing to do if they are there. Certificate settings live in `config.json`, not `.env`: if the files move, change `tls_cert_file` and `tls_key_file` there. The `.crt` must be PEM text (it starts with `-----BEGIN CERTIFICATE-----`), with any intermediate certificates appended below the server certificate. If the key has a password, put the password in a protected file and set `tls_key_password_file` to its path. The startup task runs as SYSTEM, so SYSTEM needs read access to `D:\ssl_certificate`. If the server only has the certificate in the Windows store instead, see `scripts\export-cert-from-store.ps1` and the README's HTTPS section.
 2. **Start:** run `scripts\run-server.bat`, then open `https://<server name on the certificate>:8443`.
 3. **Autostart:** from an Administrator PowerShell, run `scripts\install-startup-task.ps1`. It runs the studio at boot, restarts it if it stops, and opens the port in the firewall.
 
