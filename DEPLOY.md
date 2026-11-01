@@ -19,9 +19,9 @@ Nothing else is needed: the server, the LLM client and the Word, Excel and CSV r
 
 ## 2. What to copy
 
-Copy the whole `exec-studio` folder, **including `wheels\`**. `wheels\`, `.env`, `certs\` and `config.json` are not in git, so copy from a working folder, or run `scripts\1-download-wheels.ps1` on a machine with internet first.
+On the laptop, run `scripts\make-usb.ps1`. It builds `usb_migration\exec-studio` with exactly the files the server needs: the files tracked in git, `wheels\`, a `VERSION.txt`, and a server `.env` made from `.env.example` (`DEVELOPMENT=False`, no OpenAI key, `LLM_API_KEY` empty). Copy that `exec-studio` folder to the USB stick, together with the Python installer.
 
-Leave out `.venv\`, `logs\`, `work\` and `__pycache__\`. In `.env`, **delete the `OPENAI_API_KEY` line** before copying: it is a development key and must not go to the server.
+Never copy the laptop's own `.env`: it holds the development OpenAI key. `certs\` and `config.json` are created on the server.
 
 ## 3. Install (on the server)
 
@@ -69,3 +69,25 @@ LLM_MAX_TOKENS=4096
 - **Console:** the startup output must show `LLM <model> at <url>: reachable`. In the browser, the top-right pill shows a green dot, and `https://<server>:8443/api/health` reports `"reachable": true`.
 - **If it says unreachable:** the detail in `/api/health` names the cause: wrong URL, refused connection, certificate, or a 401 (wrong key). Without the LLM the studio still runs on built-in rules and labels its output as such.
 - **Smoke test:** work through [examples/README.md](examples/README.md). It takes about 15 minutes. Start with the demo there: it uses the files in `use_case_examples\` (a PDF study and a demo-company workbook) and exercises upload, generation, quality check, board assessment and export in one go. Copy `examples\` and `use_case_examples\` with the rest of the folder.
+
+## 7. Updates and rollback
+
+Develop and test on the laptop only. Never edit code on the server.
+
+**Release (laptop):**
+
+1. Make the change, run the tests (`python -m unittest discover -s tests`), and commit.
+2. Set `__version__` in `studio/__init__.py` (e.g. `1.5.2`), commit, and tag the release: `git tag v1.5.2`.
+3. Run `scripts\make-usb.ps1`. It warns if there are uncommitted changes: a release comes from a clean, tagged commit. If `requirements.txt` changed, run `scripts\1-download-wheels.ps1` first.
+
+**Install the update (server):**
+
+1. Stop the `exec-studio` scheduled task.
+2. Rename `D:\Apps\exec-studio` to `D:\Apps\exec-studio-prev`.
+3. Copy the new `exec-studio` folder from the USB stick to `D:\Apps\exec-studio`.
+4. Copy the server's own `.env`, `config.json` and `certs\` from `exec-studio-prev` into the new folder, replacing the `.env` from the USB stick.
+5. Run `scripts\2-install-offline.ps1`, start the task, and check `/api/health` and `VERSION.txt`.
+
+**Rollback:** stop the task, swap the two folder names back, and start the task again.
+
+Keep only the one previous version on the server. Every version shipped is a git tag on the laptop, so any of them can be rebuilt.

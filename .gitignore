@@ -9,3 +9,4 @@ wheels/
 tests/sample.pptx
 certs/
 .claude/
+usb_migration/
