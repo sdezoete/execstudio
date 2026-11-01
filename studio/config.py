@@ -3,8 +3,10 @@
 Values come from, in increasing priority:
   1. DEFAULTS below
   2. config.json next to server.py (or the file named in STUDIO_CONFIG)
-  3. environment variables STUDIO_<KEY>, e.g. STUDIO_LLM_BASE_URL
-  4. DEVELOPMENT in .env (see below) -- this always wins for LLM settings
+  3. DEVELOPMENT in .env (see below) -- this decides the LLM settings
+  4. environment variables STUDIO_<KEY>, e.g. STUDIO_LLM_BASE_URL -- set explicitly
+     (tests, ops), these win over everything, so the tests run against their mock
+     LLM on the server too
 
 Which LLM backend is used is controlled by one flag, DEVELOPMENT, in .env:
 
@@ -120,10 +122,6 @@ def load():
     if path.exists():
         with open(path, encoding="utf-8") as fh:
             cfg.update(json.load(fh))
-    for key, default in DEFAULTS.items():
-        raw = os.environ.get("STUDIO_" + key.upper())
-        if raw is not None:
-            cfg[key] = _coerce(raw, default)
 
     if _truthy(os.environ.get("DEVELOPMENT"), default=True):
         # This machine, with internet: OpenAI stands in for the real on-prem model.
@@ -154,5 +152,9 @@ def load():
         cfg["llm_reasoning_effort"] = (os.environ.get("LLM_REASONING_EFFORT") or "").strip()
         if os.environ.get("LLM_MAX_RETRIES"):
             cfg["llm_max_retries"] = _coerce(os.environ["LLM_MAX_RETRIES"], cfg["llm_max_retries"])
+    for key, default in DEFAULTS.items():
+        raw = os.environ.get("STUDIO_" + key.upper())
+        if raw is not None:
+            cfg[key] = _coerce(raw, default)
     cfg["llm_display_name"] = "ARIF"
     return cfg
