@@ -9,7 +9,7 @@ A stand-alone web app that helps people build executive-level presentations. It 
 - export an editable PowerPoint file
 - improve existing PowerPoint decks
 
-It runs on an **air-gapped Windows Server** with **Python 3.11**, serves **HTTPS with your organisation's certificate**, and uses the on-premise **DeepSeek** model.
+It runs on an **air-gapped Windows Server** with **Python 3.11**, serves **HTTPS with your organisation's certificate**, and uses the corporate **MaaS** gateway's DeepSeek model (shown to users as **ARIF**). On a development laptop, OpenAI stands in for it. One flag in `.env` switches between the two; see [Choosing the AI model](#choosing-the-ai-model-env).
 
 - **Server:** Python standard library (`http.server`), so there is no web framework to install.
 - **Optional libraries** (shipped in `wheels\`):
@@ -34,13 +34,15 @@ The package already contains the Windows wheels for Python 3.11 in `wheels\`, so
    - creates `.venv`
    - installs the libraries from `wheels\`
    - creates `config.json`
-3. Edit `config.json` and set the DeepSeek endpoint:
-   ```json
-   "llm_base_url": "http://<deepseek-host>:<port>/v1",
-   "llm_model": "<model name your server expects>"
+3. Open `.env` next to `server.py` and set the AI model:
+   ```ini
+   DEVELOPMENT=False
+   LLM_BASE_URL=https://maas.aramco.com.sa/v1
+   LLM_API_KEY=<key issued for this app>
+   LLM_MODEL=deepseek-v41-flash
    ```
-   To get the exact model name, run this on the server:
-   `Invoke-RestMethod http://<deepseek-host>:<port>/v1/models`
+   A release built with `scripts\make-usb.ps1` already contains this `.env`, with `DEVELOPMENT=False` and the recommended values, so usually you only need to fill in `LLM_API_KEY`. `LLM_MODEL` must exactly match the gateway's model id. To list the ids, run:
+   `Invoke-RestMethod https://<llm-host>/v1/models -Headers @{Authorization="Bearer <key>"}`
 4. **Set up HTTPS with your certificate.** See [HTTPS](#https) below. In short, from an Administrator PowerShell:
    ```powershell
    powershell -ExecutionPolicy Bypass -File scripts\export-cert-from-store.ps1
@@ -51,7 +53,7 @@ The package already contains the Windows wheels for Python 3.11 in `wheels\`, so
    ```
    Then open `https://<server name on the certificate>:8443`. The console prints:
    - the certificate in use and its expiry date
-   - whether DeepSeek is reachable
+   - whether the AI model is reachable
    - which features are active
 6. To run it automatically at boot, run this from an **Administrator** PowerShell:
    ```powershell
@@ -111,7 +113,7 @@ A typical `config.json` for options A and B:
   `Stop-ScheduledTask ExecutivePresentationStudio; Start-ScheduledTask ExecutivePresentationStudio`.
 - **What HTTPS enforces.** Connections use TLS 1.2 or newer; set `tls_min_version` to `"1.3"` to require TLS 1.3. Responses carry `Strict-Transport-Security`.
 - **Handshake protection.** Each connection completes its handshake in its own thread, so a slow or broken client cannot block other users.
-- **If DeepSeek is also served over HTTPS:** an internal CA that is installed in the Windows certificate store is trusted automatically. Otherwise, point `llm_ca_file` at the CA's PEM file.
+- **The AI model's own certificate:** if the LLM endpoint's certificate comes from an internal CA that is installed in the Windows certificate store, it is trusted automatically. Otherwise, point `llm_ca_file` in `config.json` at the CA's PEM file. `LLM_VERIFY_SSL=False` in `.env` turns verification off; use that only for a short test.
 
 ### For testing only: a self-signed certificate
 
@@ -143,9 +145,10 @@ Open the `exec-studio` folder in VS Code. The project includes ready-made settin
 
 - **Development runs.** The development launch configurations run plain HTTP on port 8080. The HTTPS configuration uses a throwaway test certificate, so you don't need the production certificate on a laptop.
 - **Interpreter.** The project is preset to `.venv\Scripts\python.exe`. If VS Code asks, choose that interpreter.
+- **AI model on the laptop.** Copy `.env.example` to `.env`, keep `DEVELOPMENT=True` and set `OPENAI_API_KEY`. OpenAI then stands in for the corporate model (`gpt-5.4-mini` unless `OPENAI_MODEL` says otherwise). Never copy this `.env` to the server.
 - **Run and Debug (F5):**
-  - **Studio server** runs the app with the debugger attached, using `config.json`.
-  - **Studio + mock AI** starts a fake DeepSeek on port 8001 first. Use it to develop without the real model.
+  - **Studio server** runs the app with the debugger attached, using `config.json` and `.env` (so OpenAI, on a laptop).
+  - **Studio + mock AI** starts a fake model on port 8001 first and points the studio at it with `STUDIO_LLM_BASE_URL`, which wins over `.env`. Use it to develop without any real model.
   - **Tests** runs the test suite under the debugger.
 - **Terminal → Run Task:**
   - **Run studio server**
@@ -193,6 +196,36 @@ You can also select **Restructure my presentation** instead. This builds a new a
 
 ---
 
+## Choosing the AI model (`.env`)
+
+The studio talks to any OpenAI-compatible chat-completions endpoint. Which one it uses is decided by `DEVELOPMENT` in `.env`, the file next to `server.py`. The studio reads `.env` itself, and its values override environment variables of the same name that are set on the machine.
+
+| `DEVELOPMENT` | Used on | AI model |
+|---|---|---|
+| `True` (also the default when `.env` is missing or leaves it blank) | development laptop | OpenAI, from `OPENAI_API_KEY` and `OPENAI_MODEL` (default `gpt-5.4-mini`). Without `OPENAI_API_KEY`, the `llm_*` settings in `config.json` apply. |
+| `False` | air-gapped server | Corporate MaaS gateway, from the `LLM_*` values below. These override the matching `llm_*` settings in `config.json`. |
+
+`LLM_*` values (only read when `DEVELOPMENT=False`):
+
+| Variable | Sets | If blank |
+|---|---|---|
+| `LLM_BASE_URL` | `llm_base_url`, ending in `/v1` | `config.json` value |
+| `LLM_API_KEY` | `llm_api_key` (Bearer token) | empty: once the line is in `.env`, the key in `config.json` is ignored |
+| `LLM_MODEL` | `llm_model`, exactly the gateway's model id | `config.json` value |
+| `LLM_VERIFY_SSL` | `llm_verify_ssl` | `true` |
+| `LLM_TIMEOUT_SECONDS`, `LLM_MAX_TOKENS`, `LLM_TEMPERATURE`, `LLM_MAX_RETRIES` | `llm_timeout`, `llm_max_tokens`, `llm_temperature`, `llm_max_retries` | `config.json` value |
+| `LLM_TOP_P`, `LLM_TOP_K`, `LLM_REASONING_EFFORT` | optional sampling and reasoning controls | not sent to the model |
+
+Settings are applied in this order, and each step overrides the ones before it:
+1. built-in defaults
+2. `config.json`
+3. `.env`, as above
+4. `STUDIO_<SETTING>` environment variables, for example `STUDIO_LLM_BASE_URL`
+
+Because `STUDIO_*` variables win over `.env`, the tests and the mock-AI launch configuration can point the studio at a mock even when an OpenAI key is in `.env`.
+
+The name shown to users is always **ARIF**, whatever `llm_display_name` says.
+
 ## Configuration (`config.json`)
 
 | Setting | Meaning |
@@ -204,19 +237,18 @@ You can also select **Restructure my presentation** instead. This builds a new a
 | `tls_allow_self_signed` | `false` on the server. `true` only on test machines. |
 | `tls_min_version` | `"1.2"` (default) or `"1.3"`. |
 | `http_redirect_port` | Optional plain-HTTP port that redirects to HTTPS. `0` turns it off. |
-| `llm_ca_file` | Extra CA file if DeepSeek uses HTTPS with an internal CA that isn't in the Windows store. |
-| `llm_base_url` | DeepSeek's OpenAI-compatible endpoint, ending in `/v1`. |
-| `llm_model`, `llm_display_name` | The model name sent to the API, and the name shown to users. |
-| `llm_api_key` | Bearer token, if your gateway needs one. |
+| `llm_enabled` | `false` turns the AI off; every feature then uses the built-in rules. |
+| `llm_ca_file` | Extra CA file if the LLM endpoint uses HTTPS with an internal CA that isn't in the Windows store. |
+| `llm_base_url`, `llm_model`, `llm_api_key` | Endpoint (ending in `/v1`), model id and Bearer token. With `DEVELOPMENT=False` the `LLM_*` values in `.env` override these; see [above](#choosing-the-ai-model-env). |
 | `llm_json_mode` | Asks for JSON replies. The app retries without this if the server rejects it. |
 | `llm_ignore_proxy` | Ignores proxy environment variables for the model call. |
 | `max_upload_mb`, `max_context_chars` | Upload size limit, and how much text is sent to the model. |
 | `work_dir`, `work_retention_hours` | Temporary storage for uploaded decks and results. Files are deleted after 24 hours by default. |
 | `audit_log`, `server_log` | Log files under `logs\`. |
 
-Every setting can be overridden with an environment variable, for example `set STUDIO_PORT=9000`.
+Every setting can be overridden with an environment variable, for example `set STUDIO_PORT=9000`. These variables win over both `config.json` and `.env`.
 
-If DeepSeek is unreachable, every AI feature falls back to built-in rules. The interface labels that output clearly.
+If the AI model is unreachable, every AI feature falls back to built-in rules. The interface labels that output clearly.
 
 ---
 
@@ -242,6 +274,7 @@ If DeepSeek is unreachable, every AI feature falls back to built-in rules. The i
 ```
 server.py                 web server: static files + /api
 config.example.json       copy to config.json
+.env.example              copy to .env: DEVELOPMENT flag, OpenAI (dev) and LLM_* (server) settings
 requirements.txt          optional libraries (python-pptx, pypdf)
 wheels\                   Windows / Python 3.11 wheels for offline install
 scripts\                  1-download-wheels.ps1, 2-install-offline.ps1, export-cert-from-store.ps1,
@@ -249,7 +282,8 @@ scripts\                  1-download-wheels.ps1, 2-install-offline.ps1, export-c
 certs\                    your certificate (created at install; not shipped)
 studio\
   services.py             endpoint logic; tries the LLM, falls back to rules; audit log
-  llm.py, prompts.py      DeepSeek client and prompts
+  config.py               settings: defaults, config.json, .env (DEVELOPMENT), STUDIO_* variables
+  llm.py, prompts.py      OpenAI-compatible LLM client and prompts
   fallback.py, review.py  built-in rules and quality checks
   schema.py               validation of browser and LLM data
   extract.py              text from .pptx/.docx/.xlsx/.pdf/.csv/.txt/.md
@@ -262,7 +296,7 @@ studio\
     deck.py               inventory, in-place edits, re-templating of existing decks
 data\                     templates.json, templates\, repository.json, toolkit.json
 static\                   index.html, css\app.css, js\api.js, js\thumbs.js, js\app.js
-tests\                    API tests, mock DeepSeek, sample deck builder
+tests\                    API tests, mock LLM, sample deck builder
 .vscode\                  launch, tasks, settings, recommended extensions
 ```
 
@@ -270,7 +304,7 @@ tests\                    API tests, mock DeepSeek, sample deck builder
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/health` | Status of DeepSeek, the PowerPoint engine and PDF reading |
+| GET | `/api/health` | Status of the AI model, the PowerPoint engine and PDF reading |
 | GET | `/api/meta`, `/api/repository`, `/api/toolkit` | Reference data |
 | POST | `/api/storyline` | `{brief, version, context}` → `{title, slides[], source}` |
 | POST | `/api/review`, `/api/qa`, `/api/advise`, `/api/sharpen` | Quality check, Q&A prep, slide advisor, headline rewrite |
