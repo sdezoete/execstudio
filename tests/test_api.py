@@ -475,6 +475,32 @@ class Decks(Base):
         self.assertTrue(any(getattr(sh, "has_table", False) and sh.has_table for sh in prs.slides[2].shapes))
         self.assertTrue(any("Picture carried over" in c for c in r["report"][1]["changes"]))
 
+    def test_template_without_notes_placeholder(self):  # 3 Nov server: own template, export and retemplate 500
+        from pptx import Presentation
+        from pptx.enum.shapes import PP_PLACEHOLDER
+        tp = Presentation()
+        sample = tp.slides.add_slide(tp.slide_layouts[1])  # the template already holds slides with content
+        sample.shapes.title.text = "Old content"
+        for ph in list(tp.notes_master.placeholders):
+            if ph.placeholder_format.type == PP_PLACEHOLDER.BODY:
+                ph._element.getparent().remove(ph._element)
+        buf = io.BytesIO()
+        tp.save(buf)
+        st, _, body = self.post("/api/template/upload", raw=buf.getvalue(),
+                                headers={"Content-Type": "application/octet-stream", "X-Filename": "own.pptx"})
+        self.assertEqual(st, 200, body)
+        brief = dict(BRIEF, template_file=json.loads(body)["template_file"])
+        s = json.loads(self.post("/api/storyline", {"brief": brief, "version": "full"})[2])
+        st, _, body = self.post("/api/export/pptx", {"brief": brief, "title": s["title"], "slides": s["slides"]})
+        self.assertEqual(st, 200, body)
+        prs = Presentation(io.BytesIO(body))
+        self.assertEqual(len(prs.slides), len(s["slides"]))
+        self.assertTrue(any(sl.has_notes_slide and sl.notes_slide.notes_text_frame.text for sl in prs.slides))
+        d = self._upload()
+        st, _, body = self.post("/api/deck/transform", {"deck_id": d["deck_id"], "selected": [1, 3, 4],
+                                "actions": {"retemplate": True}, "brief": brief})
+        self.assertEqual(st, 200, body)
+
     def test_storyline_chart_export_is_native(self):
         from pptx import Presentation
         slides = [{"kind": "bars", "headline": "Revenue rose 8% on enterprise demand", "body": ["Enterprise +12%"],

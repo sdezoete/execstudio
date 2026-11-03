@@ -24,7 +24,7 @@ It runs on an **air-gapped Windows Server** with **Python 3.11**, serves **HTTPS
 
 The package already contains the Windows wheels for Python 3.11 in `wheels\`, so no internet access is needed.
 
-1. Copy the `exec-studio` folder to the server, for example to `D:\Apps\exec-studio`.
+1. Copy the `exec-studio` folder to the server, for example to `D:\exec-studio`.
 2. Open PowerShell in that folder and run:
    ```powershell
    powershell -ExecutionPolicy Bypass -File scripts\2-install-offline.ps1

@@ -26,7 +26,7 @@ Never copy the laptop's own `.env`: it holds the development OpenAI key. `certs\
 ## 3. Install (on the server)
 
 ```powershell
-cd D:\Apps\exec-studio
+cd D:\exec-studio
 powershell -ExecutionPolicy Bypass -File scripts\2-install-offline.ps1
 ```
 
@@ -82,12 +82,12 @@ Develop and test on the laptop only. Never edit code on the server.
 
 **Install the update (server):**
 
-1. Stop the `exec-studio` scheduled task.
-2. Rename `D:\Apps\exec-studio` to `D:\Apps\exec-studio-prev`.
-3. Copy the new `exec-studio` folder from the USB stick to `D:\Apps\exec-studio`.
-4. Copy the server's own `.env`, `config.json` and `certs\` from `exec-studio-prev` into the new folder, replacing the `.env` from the USB stick.
-5. Run `scripts\2-install-offline.ps1`, start the task, and check `/api/health` and `VERSION.txt`.
+1. Stop the studio: `Stop-ScheduledTask ExecutivePresentationStudio` (Administrator PowerShell).
+2. Rename `D:\exec-studio` to `D:\exec-studio-prev`.
+3. Copy the new `exec-studio` folder from the USB stick to `D:\exec-studio`.
+4. Copy the server's own `.env` and `config.json` (and `certs\`, if the server has one) from `exec-studio-prev` into the new folder, replacing the `.env` from the USB stick.
+5. Run `scripts\2-install-offline.ps1`, then `Start-ScheduledTask ExecutivePresentationStudio`, and check `/api/health` and `VERSION.txt`.
 
-**Rollback:** stop the task, swap the two folder names back, and start the task again.
+**Rollback:** stop the task, rename `D:\exec-studio` to `D:\exec-studio-bad` and `D:\exec-studio-prev` back to `D:\exec-studio`, and start the task again.
 
 Keep only the one previous version on the server. Every version shipped is a git tag on the laptop, so any of them can be rebuilt.

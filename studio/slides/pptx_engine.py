@@ -373,7 +373,22 @@ def write_notes(slide, notes, source="", source_label="Source: "):
     if source:
         text += ("\n" if text else "") + source_label + source
     if text:
-        slide.notes_slide.notes_text_frame.text = text
+        notes_frame(slide).text = text
+
+
+def notes_frame(slide):
+    """The notes text frame, adding the notes placeholder when the slide has none: python-pptx copies it
+    from the notes master, and a template whose notes master has no notes placeholder leaves new notes
+    slides without one (a corporate template on the server, 3 Nov: every export failed)."""
+    notes = slide.notes_slide
+    if notes.notes_text_frame is None:
+        from pptx.oxml.shapes.autoshape import CT_Shape
+        sp = CT_Shape.new_placeholder_sp(notes.shapes._next_shape_id, "Notes Placeholder",  # noqa: SLF001
+                                         PP_PLACEHOLDER.BODY, "horz", "full", 1)
+        notes.shapes._spTree.append(sp)  # noqa: SLF001
+        ph = notes.notes_placeholder
+        ph.left, ph.top, ph.width, ph.height = Inches(0.75), Inches(4.75), Inches(6), Inches(4.5)  # default notes page
+    return notes.notes_text_frame
 
 
 # ------------------------------------------------------------------ build
