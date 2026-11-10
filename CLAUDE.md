@@ -99,4 +99,4 @@ To add an API endpoint, add a `Studio` method and register it in `Handler.POST_J
 
 ## Releases
 
-Bump `__version__` in [studio/__init__.py](studio/__init__.py) on every build handed to testers. `/api/health` and the UI show it. Recent commits do this together with the fix (`...; 1.5.2`). Then tag `vX.Y.Z` and run `scripts\make-usb.ps1`. The full update and rollback procedure is in DEPLOY.md §7. Never edit code on the server.
+Bump `__version__` in [studio/__init__.py](studio/__init__.py) on every build handed to testers. `/api/health` and the UI show it. Recent commits do this together with the fix (`...; 1.5.2`). Then tag `vX.Y.Z` and run `scripts\make-usb.ps1`, which builds `usb_X_Y_Z\exec-studio` from `__version__` (earlier `usb_*` folders are kept; all gitignored). The full update and rollback procedure is in DEPLOY.md §7. Never edit code on the server.

@@ -10,3 +10,4 @@ tests/sample.pptx
 certs/
 .claude/
 usb_migration/
+usb_*/

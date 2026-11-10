@@ -19,7 +19,7 @@ Nothing else is needed: the server, the LLM client and the Word, Excel and CSV r
 
 ## 2. What to copy
 
-On the laptop, run `scripts\make-usb.ps1`. It builds `usb_migration\exec-studio` with exactly the files the server needs: the files tracked in git, `wheels\`, a `VERSION.txt`, and a server `.env` made from `.env.example` (`DEVELOPMENT=False`, no OpenAI key, `LLM_API_KEY` empty). Copy that `exec-studio` folder to the USB stick, together with the Python installer.
+On the laptop, run `scripts\make-usb.ps1`. It builds `usb_<version>\exec-studio` (for 1.6.0: `usb_1_6_0\exec-studio`; earlier `usb_*` folders are kept) with exactly the files the server needs: the files tracked in git, `wheels\`, a `VERSION.txt`, and a server `.env` made from `.env.example` (`DEVELOPMENT=False`, no OpenAI key, `LLM_API_KEY` empty). Copy that `exec-studio` folder to the USB stick, together with the Python installer.
 
 Never copy the laptop's own `.env`: it holds the development OpenAI key. `certs\` and `config.json` are created on the server.
 
@@ -77,7 +77,7 @@ Develop and test on the laptop only. Never edit code on the server.
 **Release (laptop):**
 
 1. Make the change, run the tests (`python -m unittest discover -s tests`), and commit.
-2. Set `__version__` in `studio/__init__.py` (e.g. `1.5.2`), commit, and tag the release: `git tag v1.5.2`.
+2. Set `__version__` in `studio/__init__.py` (e.g. `1.6.0`), commit, and tag the release: `git tag v1.6.0`.
 3. Run `scripts\make-usb.ps1`. It warns if there are uncommitted changes: a release comes from a clean, tagged commit. If `requirements.txt` changed, run `scripts\1-download-wheels.ps1` first.
 
 **Install the update (server):**
