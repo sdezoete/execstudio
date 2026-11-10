@@ -167,7 +167,58 @@
     $("#tplStatus").innerHTML = t
       ? 'Using <b>' + esc(t.name) + '</b>' + (t.colors && t.colors.accent ? ' <span class="swatch" style="background:#' + esc(t.colors.accent) + '"></span>' : "")
       : "";
+    $("#tplAnalysis").innerHTML = t && t.analysis ? tplAnalysisHtml(t.analysis) : "";
   }
+
+  /* What the studio made of an uploaded template: cleaned, which layout is for what, which directions it follows. */
+  var TPL_ROLES = [["cover", "Cover slide"], ["content", "Content slides"], ["agenda", "Agenda slide"]];
+  var TPL_RULES = {
+    max_bullets: "At most %d points per slide", max_headline_words: "Headlines of at most %d words",
+    max_slides: "At most %d slides", agenda: "An agenda after the cover", source_line: "The source on every slide"
+  };
+  function tplAnalysisHtml(a) {
+    var fonts = a.fonts && (a.fonts.heading || a.fonts.body) ? " (" + esc([a.fonts.heading, a.fonts.body].filter(Boolean).join(" / ")) + ")" : "";
+    var html = '<p class="note">Cleaned: ' + a.examples + " example slide" + (a.examples === 1 ? "" : "s") + " removed" +
+      (a.removed && a.removed.length ? ", and " + a.removed.length + " instruction box" + (a.removed.length === 1 ? "" : "es") + " on the layouts" : "") +
+      ". Masters, layouts, logos, theme colours and fonts" + fonts + " are kept. " +
+      '<a href="/api/download/' + esc(a.clean_file) + '" download>Download the clean template</a></p>';
+    html += '<div class="tpl-roles">' + TPL_ROLES.map(function (r) {
+      var cur = a.layouts[r[0]] || "";
+      var opts = (r[0] === "agenda" ? '<option value="">Same as content slides</option>' : "") +
+        a.layout_names.map(function (n) { return '<option' + (n === cur ? " selected" : "") + ">" + esc(n) + "</option>"; }).join("");
+      return '<label><span>' + r[1] + '</span><select class="text" data-role="' + r[0] + '">' + opts + "</select></label>";
+    }).join("") + "</div>";
+    var rules = Object.keys(TPL_RULES).filter(function (k) { return a.rules[k]; }).map(function (k) {
+      return "<li>" + esc(TPL_RULES[k].replace("%d", a.rules[k])) + "</li>";
+    });
+    html += "<p class=\"note\"><b>Directions followed</b></p>" + (rules.length ? "<ul>" + rules.join("") + "</ul>" : '<p class="note">No limits found in the template.</p>');
+    var open = a.guidance.filter(function (g) { return !g.applied.length; });
+    if (open.length) {
+      html += '<p class="note"><b>For you to check</b> (the studio cannot apply these itself)</p><ul class="tpl-open">' +
+        open.map(function (g) { return "<li>" + esc(g.text) + " <small>" + esc(g.where) + "</small></li>"; }).join("") + "</ul>";
+    }
+    if (a.guidance.length) {
+      html += "<details><summary>All guidance found (" + a.guidance.length + ")</summary><ul>" + a.guidance.map(function (g) {
+        return "<li>" + (g.applied.length ? '<span class="chip ok">Followed</span> ' : '<span class="chip warn">Check</span> ') +
+          esc(g.text) + " <small>" + esc(g.where) + "</small></li>";
+      }).join("") + "</ul></details>";
+    }
+    html += '<p class="note">' + (a.source === "llm" ? "Read by ARIF." : "Read by built-in rules." + (a.warning ? " " + esc(a.warning) : "")) + "</p>";
+    return html;
+  }
+  $("#tplAnalysis").addEventListener("change", async function (e) {
+    var sel = e.target.closest("select[data-role]");
+    if (!sel || !state.templateFile) return;
+    var layouts = {};
+    layouts[sel.dataset.role] = sel.value || null;
+    try {
+      var r = await Api.post("/api/template/profile", { template_file: state.templateFile.template_file, layouts: layouts });
+      state.templateFile.analysis = r.analysis;
+      toast("Layout updated.");
+    } catch (err) { toast(err.message, true); }
+    renderTplStatus();
+    save();
+  });
 
   async function loadHealth() {
     var pill = $("#modelPill"), foot = $("#railFoot");
@@ -727,7 +778,8 @@
     var f = e.target.files[0];
     e.target.value = "";
     if (!f) return;
-    $("#tplStatus").textContent = "Uploading " + f.name + "…";
+    $("#tplStatus").textContent = "Uploading and reading " + f.name + "…";
+    $("#tplAnalysis").innerHTML = "";
     try {
       state.templateFile = await Api.uploadTemplate(f);
       renderTplStatus();
@@ -761,7 +813,7 @@
     state.deck = null; state.xformResult = null; state.templateFile = null;
     state.stages = ["todo", "todo", "todo", "todo", "todo", "todo"];
     syncTaskUi();
-    $("#tplStatus").textContent = ""; updateTplVisibility();
+    $("#tplStatus").textContent = ""; $("#tplAnalysis").innerHTML = ""; updateTplVisibility();
     renderFiles(); renderPipeline(); renderDeck(); renderBoard(); renderXform(); selectTab("story"); save();
     $("#topic").focus();
   });

@@ -107,6 +107,17 @@ textarea.text{resize:vertical}
 .filelist button:hover{color:var(--crit)}
 .swatch{display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:middle;box-shadow:0 0 0 1px var(--line)}
 #tplStatus .err{color:var(--crit)}
+.tpl-analysis{display:flex;flex-direction:column;gap:6px;color:var(--ink)}
+.tpl-analysis:empty{display:none}
+.tpl-analysis ul{margin:0;padding-left:18px;font-size:12.5px}
+.tpl-analysis li{margin:2px 0}
+.tpl-analysis small{color:var(--muted)}
+.tpl-analysis details{font-size:12.5px}
+.tpl-analysis summary{cursor:pointer;color:var(--muted)}
+.tpl-analysis .tpl-open li{color:var(--warn)}
+.tpl-roles{display:grid;gap:6px}
+.tpl-roles label{display:grid;grid-template-columns:minmax(0,9em) minmax(0,1fr);gap:8px;align-items:center;font-size:12.5px}
+.tpl-roles select{min-width:0;width:100%}
 .form-error{margin:0;color:var(--crit);background:var(--crit-soft);border-radius:6px;padding:8px 10px;font-size:13px}
 .btn{all:unset;box-sizing:border-box;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:6px;padding:10px 16px;font-weight:600;font-size:14px}
 .btn-primary{background:var(--accent);color:var(--accent-ink)}

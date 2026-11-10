@@ -18,13 +18,15 @@ from .checks import (MAX_HEADLINE_WORDS, POLITICAL_RISK, clean_storyline, flag_i
 from .config import ROOT
 from .extract import PDF_SUPPORTED, ExtractError, extract
 from .llm import LLMClient, LLMError
+from .slides.layouts import label as slide_label
 from .workspace import Workspace
 
 try:
     from .slides import deck as deck_ops
+    from .slides import template_kit
     from .slides.deck import DeckError
 except ImportError:  # python-pptx not installed: deck transformation unavailable
-    deck_ops = None
+    deck_ops = template_kit = None
 
     class DeckError(Exception):
         pass
@@ -108,46 +110,55 @@ class Studio:
             raise schema.BadRequest("Add a presentation topic.")
         version = payload.get("version") if payload.get("version") in schema.VERSIONS else "full"
         ctx = self._context(b, str(payload.get("context") or ""))
+        rules = self._template_rules(b)
         lo, hi = catalog.slide_range(b["length"], version, b["task"])
+        cap = rules.get("max_slides")
+        if cap:
+            cap = max(1, cap - (1 if rules.get("agenda") else 0))  # export adds the agenda slide
+            hi = min(hi, cap)
+            lo = min(lo, hi)
 
         source_figures = numbers(" ".join([b["topic"], b["decision"], ctx]))
 
         def call():
-            system, user = prompts.storyline(b, version, ctx)
+            system, user = prompts.storyline(b, version, ctx, rules=rules, slide_cap=cap)
             data = schema.storyline(self.llm.chat_json(system, user), b["topic"])
             invented = invented_figures(data["slides"], source_figures)
             if invented:
                 # every figure must come from the brief (round 6: an invented plan when the brief had no facts)
-                system, user = prompts.storyline(b, version, ctx, invented=invented)
+                system, user = prompts.storyline(b, version, ctx, invented=invented, rules=rules, slide_cap=cap)
                 data = schema.storyline(self.llm.chat_json(system, user), b["topic"])
             data["slides"] = clean_storyline(data["slides"][:max(hi, 1)], bool(ctx))
             if len(data["slides"]) < lo:
                 # e.g. one "please send me facts" slide when no facts were given (test report D-09)
                 raise ValueError("the AI returned %d slide%s, fewer than the %d asked for"
                                  % (len(data["slides"]), "" if len(data["slides"]) == 1 else "s", lo))
-            self._shorten_headlines(data["slides"], b)
+            self._shorten_headlines(data["slides"], b, max_words=_headline_limit(rules))
             flag_invented(data["slides"], source_figures)
             return data
 
         result, meta = self._ai("storyline", call, lambda: fallback.storyline(b, version), b)
+        if cap and len(result["slides"]) > cap:
+            result["slides"] = result["slides"][:max(1, cap - 1)] + result["slides"][-1:]  # keep the closing ask
+        _fit_bullets(result["slides"], rules)
         result.update(meta)
         result["version"] = version
         return result
 
-    def _shorten_headlines(self, slides, b, limit=3):
+    def _shorten_headlines(self, slides, b, limit=3, max_words=MAX_HEADLINE_WORDS):
         """Headlines over the word limit get one targeted retry each (at most `limit` per deck, so a bad
         answer can't multiply the wait); a retry that still fails leaves the original for Quality check
-        to flag."""
+        to flag. max_words: a stricter limit set by the uploaded template."""
         # cover slides included: Quality check holds every headline to the limit
-        long_ones = [s for s in slides if len(s["headline"].split()) > MAX_HEADLINE_WORDS][:limit]
+        long_ones = [s for s in slides if len(s["headline"].split()) > max_words][:limit]
         for s in long_ones:
             try:
-                system, user = prompts.sharpen(s["headline"], s["body"], b, (s["headline"], headline_problem(s["headline"])))
+                system, user = prompts.sharpen(s["headline"], s["body"], b, (s["headline"], headline_problem(s["headline"], max_words)))
                 h = str(self.llm.chat_json(system, user, max_tokens=300)["headline"]).strip()
             except (LLMError, ValueError, KeyError, TypeError) as e:
                 log.warning("storyline: could not shorten a headline (%s)", e)
                 continue
-            if h and not headline_problem(h) and not missing_facts([s["headline"]], [h] + s["body"]):
+            if h and not headline_problem(h, max_words) and not missing_facts([s["headline"]], [h] + s["body"]):
                 s["headline"] = h[:300]
 
     def review(self, payload):
@@ -155,7 +166,7 @@ class Studio:
         slides = schema.slides(payload.get("slides"))
         if not slides:
             raise schema.BadRequest("There are no slides to check.")
-        return review.run(b, slides)
+        return review.run(b, slides, self._template_rules(b))
 
     def qa(self, payload):
         b = schema.brief(payload.get("brief"))
@@ -279,7 +290,15 @@ class Studio:
             tpl = dict(catalog.template(""), **slide_engine.theme_colors(data))  # house palette as the base, overridden by whatever the theme carries
             tpl["name"] = Path(name).stem[:60] or "Uploaded template"
             tpl["file"] = None
-            meta = {"template_name": tpl["name"], "title": title,
+            prof = self._template_profile(b)
+            if prof:
+                lay = prof.get("layouts") or {}
+                tpl["layouts"] = {"title": lay.get("cover") or "", "content": lay.get("content") or "",
+                                  "agenda": lay.get("agenda") or ""}
+                tpl["rules"] = prof.get("rules") or {}
+                tpl["font"] = (prof.get("fonts") or {}).get("body") or tpl.get("font")
+                tpl["name"] = prof.get("name") or tpl["name"]
+            meta = {"template_name": tpl["name"], "title": title, "own_footer": bool(prof),
                     "audience": catalog.AUDIENCE_BY_ID[b["audience"]]["label"],
                     "date": _dt.date.today().strftime("%d %B %Y")}
             return tpl, meta, (data, is_potx)
@@ -302,9 +321,65 @@ class Studio:
             slide_engine.validate_uploaded_template(data, ext == "potx")
         except ValueError as e:
             raise schema.BadRequest("This file could not be opened as a PowerPoint template. Check it opens in PowerPoint and try again.") from e
-        fid = self.work.put(data, name)
-        self.audit("template_upload", None, ext=ext)
-        return {"template_file": fid, "name": name, "colors": slide_engine.theme_colors(data)}
+        try:
+            inv = template_kit.inventory(data, ext == "potx")
+            clean, removed = template_kit.clean(data, ext == "potx")
+        except Exception:  # noqa: BLE001  an unusual file: use it as it is, as before this analysis existed
+            log.exception("template_upload: could not analyse %s; using it unchanged", name)
+            fid = self.work.put(data, name)
+            self.audit("template_upload", None, ext=ext, analysed=False)
+            return {"template_file": fid, "name": name, "colors": slide_engine.theme_colors(data), "analysis": None}
+
+        # Company templates are usually decks: examples, odd layout names, instructions on and beside the slides
+        # and in the notes. Store the cleaned file, and a reading of which layout is for what and which limits
+        # the guidance sets; examples and guidance text never reach a new deck.
+        def call():
+            system, user = prompts.template_profile(inv)
+            return template_kit.profile(inv, self.llm.chat_json(system, user))
+
+        prof, meta = self._ai("template_analysis", call, lambda: template_kit.profile(inv))
+        stem = Path(name).stem[:80] or "template"
+        prof.update(removed=removed, name=stem, warning=meta.get("warning", ""))
+        fid = self.work.put(clean, stem + ".pptx")
+        prof["clean_file"] = self.work.put(template_kit.as_potx(clean), stem + " (clean).potx")
+        self.work.put_json(fid, prof)
+        self.audit("template_upload", None, ext=ext, examples=prof["examples"], guidance=len(prof["guidance"]),
+                   removed=len(removed), source=meta["source"])
+        return {"template_file": fid, "name": name, "colors": slide_engine.theme_colors(data), "analysis": prof}
+
+    def template_profile(self, payload):
+        """The user corrects which layout serves which role."""
+        fid = str(payload.get("template_file") or "")
+        try:
+            prof = self.work.get_json(fid)
+        except KeyError as e:
+            raise schema.BadRequest("That uploaded template has expired. Upload it again.") from e
+        wanted = payload.get("layouts") if isinstance(payload.get("layouts"), dict) else {}
+        for role in template_kit.ROLES:
+            if role not in wanted:
+                continue
+            name = wanted[role] or None
+            if name is None and role in ("cover", "content"):
+                raise schema.BadRequest("Choose a layout for the %s slides." % role)
+            if name is not None and name not in prof["layout_names"]:
+                raise schema.BadRequest("The template has no layout called '%s'." % str(name)[:80])
+            prof["layouts"][role] = name
+        self.work.put_json(fid, prof)
+        return {"template_file": fid, "analysis": prof}
+
+    def _template_profile(self, b):
+        """The stored reading of the brief's uploaded template, or None."""
+        fid = (b.get("template_file") or "").strip()
+        if not fid:
+            return None
+        try:
+            return self.work.get_json(fid)
+        except KeyError:
+            return None
+
+    def _template_rules(self, b):
+        prof = self._template_profile(b)
+        return (prof or {}).get("rules") or {}
 
     def export_pptx(self, payload):
         b = schema.brief(payload.get("brief"))
@@ -314,14 +389,23 @@ class Studio:
         title = str(payload.get("title") or b["topic"] or "Presentation")[:200]
         tpl, meta, upload = self._meta(b, title)
         template_bytes, template_is_potx = upload if upload else (None, False)
+        over_limit = _fit_bullets(slides, tpl.get("rules"))   # the user may have added points after generating
         data = slide_engine.build(title, slides, meta, tpl, template_bytes, template_is_potx)
         self.audit("export_pptx", b, slides=len(slides), engine=slide_engine.ENGINE)
-        moved = [(i, len(s["overflow"])) for i, s in enumerate(slides, 1) if s.get("overflow")]
+        agenda_at = 2 if (tpl.get("rules") or {}).get("agenda") and sum(s["kind"] != "title" for s in slides) >= 2 else 0
+        if agenda_at and slides[0]["kind"] != "title":
+            agenda_at = 1
+        moved = [(i + (1 if agenda_at and i >= agenda_at else 0), len(s["overflow"]))   # numbered as exported
+                 for i, s in enumerate(slides, 1) if s.get("overflow")]
         notice = ""
         if moved:
             notice = "%d point%s did not fit the layout on slide%s %s and moved to the speaker notes." % (
                 sum(n for _, n in moved), "" if sum(n for _, n in moved) == 1 else "s",
                 "" if len(moved) == 1 else "s", ", ".join(str(i) for i, _ in moved))
+        if over_limit:
+            notice = (notice + " " if notice else "") + (
+                "%d point%s moved to the speaker notes: the template allows %d per slide." % (
+                    over_limit, "" if over_limit == 1 else "s", tpl["rules"]["max_bullets"]))
         return _filename(title, "pptx"), data, notice
 
     # ------------------------------------------------------------ existing decks
@@ -509,6 +593,31 @@ class Studio:
                                 "_Evidence: %s_" % q.get("evidence", "–"), ""]
         self.audit("export_briefing", b, slides=len(slides))
         return _filename(title + " briefing", "md"), "\n".join(out).encode("utf-8")
+
+
+def _headline_limit(rules):
+    """The stricter of the studio's headline limit and the uploaded template's."""
+    return min(MAX_HEADLINE_WORDS, (rules or {}).get("max_headline_words") or MAX_HEADLINE_WORDS)
+
+
+_BULLET_KINDS = ("summary", "driver", "decision", "roadmap", "bars")   # not tables, KPI tiles or matrices
+
+
+def _fit_bullets(slides, rules):
+    """Points beyond the uploaded template's per-slide limit move to the speaker notes, so nothing is lost.
+    Returns how many moved."""
+    n = (rules or {}).get("max_bullets")
+    moved = 0
+    if not n:
+        return 0
+    for s in slides:
+        if s["kind"] not in _BULLET_KINDS or len(s.get("body") or []) <= n:
+            continue
+        extra, s["body"] = s["body"][n:], s["body"][:n]
+        moved += len(extra)
+        s["notes"] = ((s.get("notes") or "") + "\n\n" + slide_label(s, "Moved from the slide:") + "\n"
+                      + "\n".join("- " + x for x in extra)).strip()
+    return moved
 
 
 def _filename(title, ext):

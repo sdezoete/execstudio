@@ -67,13 +67,13 @@ def is_placeholder(text):
     return not t or bool(_PLACEHOLDER.match(t)) or (t.startswith("[") and t.endswith("]"))
 
 
-def headline_problem(headline):
+def headline_problem(headline, max_words=MAX_HEADLINE_WORDS):
     """Why a generated action title breaks Quality check's rules, or "" when it is fine."""
     n = len((headline or "").split())
     if not n or is_placeholder(headline):
         return "it is empty or a placeholder"
-    if n > MAX_HEADLINE_WORDS:
-        return "it has %d words; the maximum is %d" % (n, MAX_HEADLINE_WORDS)
+    if n > max_words:
+        return "it has %d words; the maximum is %d" % (n, max_words)
     if n < MIN_HEADLINE_WORDS or TOPIC_LABEL.search(headline.strip()):
         return "it names a topic instead of stating the finding"
     return ""

@@ -24,6 +24,7 @@ $env:STUDIO_TLS_ENABLED=0; $env:STUDIO_PORT=8080; .venv\Scripts\python.exe serve
 $env:STUDIO_LLM_BASE_URL="http://127.0.0.1:8001/v1"
 
 .venv\Scripts\python.exe tests\sample_deck.py tests\sample.pptx   # sample deck for transform testing
+.venv\Scripts\python.exe tests\sample_template.py company.pptx    # simulated company template (examples + guidance)
 .venv\Scripts\python.exe scripts\make-test-cert.py                # self-signed cert, dev only
 ```
 
@@ -70,6 +71,9 @@ studio/slides/
   pptx_engine.py     canvas on python-pptx: corporate templates, native charts
   xml_engine.py      canvas in pure stdlib OOXML: fallback when python-pptx is absent
   deck.py            existing decks: inventory, in-place edits, re-templating (needs python-pptx)
+  template_kit.py    uploaded "template" decks: inventory of guidance (on/beside slides, notes, layouts,
+                     placeholder prompts), clean() strips slides + guidance shapes, roles()/rules() read
+                     which layout is for what and the limits; profile() merges the validated AI reading
 static/              index.html, js/api.js (fetch wrapper), js/app.js (UI), js/thumbs.js, css/app.css
 data/                templates.json + templates/ (corporate .potx), repository.json, toolkit.json
 ```
@@ -83,6 +87,7 @@ To add an API endpoint, add a `Studio` method and register it in `Handler.POST_J
 - **Uploaded content is data, not instructions** (prompt-injection guard in the prompts).
 - **Audit log is metadata only** (`logs/audit.log`, JSON lines). Never log slide text, facts or file contents.
 - **In-place deck edits must keep every fact and number.** `missing_facts`/`rewrite_problem` reject rewrites that lose them.
+- **Uploaded templates give settings, not instructions.** `/api/template/upload` stores the *cleaned* file plus a profile (`Workspace.put_json`). Only validated fields (layout name per role, `max_bullets`, `max_headline_words`, `max_slides`, `agenda`, `source_line`) flow into prompts (`prompts.template_limits`), export (`_fit_bullets`, `pptx_engine.with_agenda`) and review. The template's own wording and example-slide content never reach the storyline prompt. Real company templates can't be shared (DLP), so [tests/sample_template.py](tests/sample_template.py) simulates one. Extend it when you meet a new pattern.
 - Board-assessment outcomes are partly decided by code, not the model (`_apply_context`, `_enforce_opening_ask`, `_enforce_decision_slide`, `_readiness` in services.py). The working week is Sun–Thu (`_WEEKEND`).
 
 ## Tests

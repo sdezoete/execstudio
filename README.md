@@ -179,6 +179,17 @@ Recommended extensions are **Python** and **Python Debugger**, both from Microso
 
 Slides are then built on your real masters and layouts. Until the files are in place, the app uses a clean built-in 16:9 template.
 
+### Uploading a company template as it is
+
+Under *Presentation Templates → Upload my own*, people can upload the template deck they were given, even when it is a normal deck full of examples and instructions. The studio reads it first:
+
+- **It finds the guidance**, wherever it is: on the example slides, in text boxes parked beside the slide, in the speaker notes, in a placeholder's prompt text, or drawn on the layouts in Slide Master view.
+- **It cleans the deck into a real template.** Every slide is removed, along with every instruction box, callout and off-page note on the layouts and masters. Masters, layouts, placeholders, logos, brand shapes, theme colours and fonts are kept. The clean template can be downloaded as a `.potx`, for example to register it in `data\templates.json`.
+- **It works out which layout is for what** (cover, content slides, agenda; section and closing layouts are recognised too), whatever the layouts are called. The user can correct each choice in a drop-down.
+- **It follows the directions it can**: at most N points per slide, headline length, at most N slides, an agenda after the cover, a source on every slide. These go into generation, export (extra points move to the speaker notes) and the quality check. Anything else it found is listed under *For you to check*.
+
+Only these settings are taken from the template. Its wording is shown to the user but never passed to the AI as an instruction, and nothing from the example slides, such as their figures, ever reaches a new deck. ARIF reads the template when it is reachable; otherwise built-in rules do, and the result is labelled.
+
 ### Improving an existing deck
 
 Choose *Improve an existing deck* and upload a .pptx. The app lists every slide with its charts, tables and pictures. Select slides, then choose any of three changes:
@@ -294,6 +305,7 @@ studio\
     pptx_engine.py        python-pptx engine (templates, native charts)
     xml_engine.py         standard-library fallback engine
     deck.py               inventory, in-place edits, re-templating of existing decks
+    template_kit.py       uploaded company templates: find guidance, clean, layout roles and rules
 data\                     templates.json, templates\, repository.json, toolkit.json
 static\                   index.html, css\app.css, js\api.js, js\thumbs.js, js\app.js
 tests\                    API tests, mock LLM, sample deck builder
@@ -311,5 +323,7 @@ tests\                    API tests, mock LLM, sample deck builder
 | POST | `/api/extract` | Raw file body plus an `X-Filename` header → extracted text |
 | POST | `/api/export/pptx`, `/api/export/briefing` | PowerPoint download; Markdown briefing pack |
 | POST | `/api/deck/upload` | Raw .pptx body → `{deck_id, slides[], text}` |
+| POST | `/api/template/upload` | Raw .pptx/.potx body → `{template_file, name, colors, analysis}`; `analysis` holds the layouts per role, the rules, the guidance found and `clean_file` (the clean .potx) |
+| POST | `/api/template/profile` | `{template_file, layouts{cover, content, agenda}}` → corrected `analysis` |
 | POST | `/api/deck/transform` | `{deck_id, selected[], actions{headlines, simplify, retemplate}, brief}` → `{file_id, report[]}` |
 | GET | `/api/download/<file_id>` | Fetch a generated file |

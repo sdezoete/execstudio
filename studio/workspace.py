@@ -3,6 +3,7 @@
 Files live in work/ next to server.py, under random ids, and are deleted after
 `work_retention_hours`. Nothing here is a permanent record.
 """
+import json
 import re
 import secrets
 import threading
@@ -45,6 +46,17 @@ class Workspace:
         name_p = self._path(fid, ".name")
         name = name_p.read_text(encoding="utf-8") if name_p.exists() else "file"
         return p.read_bytes(), name
+
+    def put_json(self, fid, obj):
+        """Data kept alongside a stored file (an uploaded template's reading); expires with it."""
+        self._path(fid, ".json").write_text(json.dumps(obj, ensure_ascii=False), encoding="utf-8")
+
+    def get_json(self, fid):
+        """The data stored with put_json; raises KeyError if there is none."""
+        p = self._path(fid, ".json")
+        if not p.exists():
+            raise KeyError(fid)
+        return json.loads(p.read_text(encoding="utf-8"))
 
     def sweep(self, force=False):
         now = time.time()

@@ -25,7 +25,7 @@ _ARABIC = {
     "[Add content]": "[أضف المحتوى]", "Source: ": "المصدر: ", "Evidence gap: ": "أدلة مطلوبة: ",
     "Moved from the slide:": "نُقل من الشريحة:", "Phase %d": "المرحلة %d", "DECISION REQUIRED": "القرار المطلوب",
     "Value": "القيمة", "Risk and effort →": "← المخاطر والجهد", "Likelihood": "الاحتمال", "Impact →": "← الأثر",
-    "Small print on the original slide:": "نص صغير في الشريحة الأصلية:",
+    "Small print on the original slide:": "نص صغير في الشريحة الأصلية:", "Agenda": "جدول الأعمال",
 }
 
 

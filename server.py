@@ -73,6 +73,7 @@ class Handler(BaseHTTPRequestHandler):
         "/api/advise": "advise",
         "/api/sharpen": "sharpen",
         "/api/deck/transform": "deck_transform",
+        "/api/template/profile": "template_profile",
     }
 
     def do_GET(self):
@@ -296,6 +297,8 @@ def _ctype_for(fid, studio):
         _, name = studio.work.get(fid)
     except KeyError:
         return "application/octet-stream"
+    if name.lower().endswith(".potx"):
+        return "application/vnd.openxmlformats-officedocument.presentationml.template"
     return PPTX_TYPE if name.lower().endswith(".pptx") else "application/octet-stream"
 
 

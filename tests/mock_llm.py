@@ -21,6 +21,35 @@ SHARPEN_REPLIES = []   # headlines to return first, before the default good one
 # "always" on retries too; STORY_CALLS counts storyline requests
 STORY_INVENT = ""
 STORY_CALLS = []
+TEMPLATE_REPLY = []    # template readings to return first (e.g. a wrong one), before the default good one
+
+
+def _read_template(user_content):
+    """What a good model makes of a template: layouts from their names and example titles, limits from the
+    guidance. It is deliberately a different method from template_kit's patterns."""
+    data = json.loads(user_content.split("TEMPLATE\n", 1)[1])
+    lts = data["layouts"]
+
+    def pick(*words, exclude=()):
+        for lt in lts:
+            said = (lt["name"] + " " + " ".join(lt["example_titles"])).lower()
+            if lt["name"] not in exclude and any(w in said for w in words):
+                return lt["name"]
+        return None
+    cover = pick("opener", "cover", "title slide") or lts[0]["name"]
+    content = pick("std", "headline", "title only", exclude=(cover,)) or lts[min(1, len(lts) - 1)]["name"]
+    text = " ".join(g["text"] for g in data["guidance"]).lower()
+    rules = {}
+    for key, rx in (("max_bullets", r"(\d+) bullet"), ("max_headline_words", r"at most (\d+) words"),
+                    ("max_slides", r"(\d+) slides")):
+        m = re.search(rx, text)
+        rules[key] = int(m.group(1)) if m else None
+    rules["agenda"] = "agenda" in text
+    rules["source_line"] = "source" in text
+    applied = {str(g["id"]): ["layout"] for g in data["guidance"] if "slide" in g["text"].lower() and "cover" in g["text"].lower()}
+    return {"layouts": {"cover": cover, "content": content, "agenda": pick("agenda", exclude=(cover, content)),
+                        "section": pick("break", "section", exclude=(cover, content)), "closing": None},
+            "rules": rules, "applied": applied}
 
 
 def _simplify(body):
@@ -162,6 +191,8 @@ class H(BaseHTTPRequestHandler):
                        "decision_clarity", "executive_relevance", "message_titles", "evidence", "conciseness",
                        "decision_flow", "technical_depth", "consistency", "risk_visibility", "closing_decision")},
                    "summary": "This deck is not board-ready because it fails the critical PRES-07 requirement. Message titles are crisp. Ready."}
+        elif "company PowerPoint template" in system:
+            out = TEMPLATE_REPLY.pop(0) if TEMPLATE_REPLY else _read_template(req["messages"][1]["content"])
         elif "pre-read" in system:
             out = {"brief": "## Context\nTest brief."}
         else:

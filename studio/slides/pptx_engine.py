@@ -137,13 +137,16 @@ def _ph_types(layout):
 
 
 def find_layout(prs, tpl, role):
-    """role: 'title' or 'content'. Uses names from templates.json, then sensible defaults."""
+    """role: 'title', 'content' or 'agenda'. Uses names from templates.json (or an uploaded template's
+    reading), then sensible defaults; an agenda without a layout of its own uses the content layout."""
     wanted = ((tpl.get("layouts") or {}).get(role) or "").strip().lower()
     all_layouts = list(prs.slide_layouts)
     if wanted:
         for lt in all_layouts:
             if lt.name.strip().lower() == wanted:
                 return lt
+    if role not in ("title", "content"):
+        return find_layout(prs, tpl, "content")
     if role == "title":
         for lt in all_layouts:
             if PP_PLACEHOLDER.CENTER_TITLE in _ph_types(lt):
@@ -341,7 +344,8 @@ def content_area(prs, slide):
 
 def footer(prs, c, idx, total, meta, slide=None):
     sw, sh = inches(prs.slide_width), inches(prs.slide_height)
-    c.text(0.5, sh - 0.48, sw * 0.55, 0.35, meta["template_name"], size=9, color=c.colors["muted"])
+    if not meta.get("own_footer"):  # an uploaded company template has its own footer: never print over it
+        c.text(0.5, sh - 0.48, sw * 0.55, 0.35, meta["template_name"], size=9, color=c.colors["muted"])
     if idx:
         c.text(sw - 1.55, sh - 0.48, 1.05, 0.35, "%d / %d" % (idx, total), size=9, color=c.colors["muted"], align="r")
     if slide is None:
@@ -392,12 +396,31 @@ def notes_frame(slide):
 
 
 # ------------------------------------------------------------------ build
+def with_agenda(slides, tpl):
+    """The slides with an agenda after the cover, when an uploaded template's guidance asks for one:
+    the content slides' headlines, in order."""
+    content = [s for s in slides if s["kind"] != "title"]
+    if not (tpl.get("rules") or {}).get("agenda") or len(content) < 2:
+        return slides
+    agenda = {"kind": "agenda", "headline": layouts.label(content[0], "Agenda"), "body": [s["headline"] for s in content]}
+    at = 1 if slides and slides[0]["kind"] == "title" else 0
+    return slides[:at] + [agenda] + slides[at:]
+
+
 def build(title, slides, meta, tpl, template_path=None, template_bytes=None, template_is_potx=False):
     prs = open_template_bytes(template_bytes, template_is_potx) if template_bytes is not None else open_template(template_path)
     lt_title = find_layout(prs, tpl, "title")
     lt_content = find_layout(prs, tpl, "content")
+    slides = with_agenda(slides, tpl)
     total = len(slides)
     for i, s in enumerate(slides, 1):
+        if s["kind"] == "agenda":
+            slide = add_headline_slide(prs, find_layout(prs, tpl, "agenda"), s["headline"], tpl)
+            c = PptxCanvas(slide, tpl)
+            ax, ay, aw, ah = content_area(prs, slide)
+            c.text(ax, ay, aw, ah, s["body"], size=18 if len(s["body"]) <= 6 else 15, bullet=True)
+            footer(prs, c, i, total, meta)
+            continue
         if s["kind"] == "title":
             slide = prs.slides.add_slide(lt_title)
             keep = TITLE_TYPES + (PP_PLACEHOLDER.SUBTITLE,)

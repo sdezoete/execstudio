@@ -418,6 +418,7 @@ class WithLLM(Base):
 try:
     import pptx  # noqa: F401
     import sample_deck
+    import sample_template
     HAVE_PPTX = True
 except ImportError:
     HAVE_PPTX = False
@@ -500,6 +501,108 @@ class Decks(Base):
         st, _, body = self.post("/api/deck/transform", {"deck_id": d["deck_id"], "selected": [1, 3, 4],
                                 "actions": {"retemplate": True}, "brief": brief})
         self.assertEqual(st, 200, body)
+
+    # ---- an uploaded company template: examples, odd names, guidance everywhere (tests/sample_template.py)
+    def _company_template(self):
+        st, _, body = self.post("/api/template/upload", raw=sample_template.build(),
+                                headers={"Content-Type": "application/octet-stream", "X-Filename": "Company%20master.pptx"})
+        self.assertEqual(st, 200, body)
+        return json.loads(body)
+
+    def _all_text(self, prs):
+        out = []
+        for part in list(prs.slides) + list(prs.slide_layouts) + list(prs.slide_masters):
+            out += [sh.text_frame.text for sh in part.shapes if sh.has_text_frame]
+        out += [s.notes_slide.notes_text_frame.text for s in prs.slides if s.has_notes_slide]
+        return "\n".join(out)
+
+    def test_company_template_read_and_cleaned(self):
+        t = self._company_template()
+        a = t["analysis"]
+        self.assertEqual(a["source"], "llm")
+        self.assertEqual(a["examples"], 6)
+        self.assertEqual(a["layouts"]["cover"], "LAY_01 Opener")
+        self.assertEqual(a["layouts"]["content"], "LAY_06 Std headline")
+        self.assertEqual(a["layouts"]["agenda"], "LAY_02 Text")
+        self.assertEqual(a["rules"], {"max_bullets": 4, "max_headline_words": 12, "max_slides": 12, "agenda": True,
+                                      "source_line": True})
+        self.assertEqual(a["fonts"], {"heading": "Georgia", "body": "Segoe UI"})
+        self.assertEqual(len(a["removed"]), 2)                       # the callout and the note beside the layout
+        open_items = [g["text"] for g in a["guidance"] if not g["applied"]]
+        self.assertTrue(any("Closing slide" in x for x in open_items))   # not built: the user is told
+        self.assertTrue(all(g["applied"] for g in a["guidance"] if "maximum 4 bullet" in g["text"]))
+
+        st, h, body = self.get("/api/download/" + a["clean_file"])   # the clean template, to keep or register
+        self.assertEqual(st, 200)
+        self.assertIn("presentationml.template", h["Content-Type"])
+        z = zipfile.ZipFile(io.BytesIO(body))
+        self.assertIn(b"presentationml.template.main+xml", z.read("[Content_Types].xml"))
+        self.assertFalse([n for n in z.namelist() if n.startswith("ppt/slides/slide")])
+        self.assertFalse([n for n in z.namelist() if n.startswith("ppt/charts/")])  # the example chart is gone
+        self.assertIn(b"Segoe UI", z.read("ppt/theme/theme1.xml"))
+
+    def test_company_template_followed_on_export(self):
+        from pptx import Presentation
+        t = self._company_template()
+        brief = dict(BRIEF, template_file=t["template_file"])
+        s = json.loads(self.post("/api/storyline", {"brief": brief, "version": "full"})[2])
+        self.assertLessEqual(len(s["slides"]), 11)                   # 12 allowed, one is the agenda
+        slides = s["slides"]
+        long_one = next(x for x in slides if x["kind"] in ("summary", "driver", "decision"))
+        long_one["body"] = ["Point %d of the slide" % k for k in range(1, 8)]
+        st, h, body = self.post("/api/export/pptx", {"brief": brief, "title": s["title"], "slides": slides})
+        self.assertEqual(st, 200, body)
+        self.assertIn("the template allows 4 per slide", h["X-Studio-Notice"])
+        prs = Presentation(io.BytesIO(body))
+        self.assertEqual(len(prs.slides), len(slides) + 1)
+        names = [x.slide_layout.name for x in prs.slides]
+        self.assertEqual(names[0], "LAY_01 Opener")
+        self.assertEqual(names[1], "LAY_02 Text")
+        self.assertEqual(prs.slides[1].shapes.title.text_frame.text, "Agenda")
+        self.assertEqual(set(names[2:]), {"LAY_06 Std headline"})
+        text = self._all_text(prs)
+        for leak in sample_template.EXAMPLE_FIGURES + ("Project Falcon", "Guideline", "EXAMPLE", "key message", "How to use"):
+            self.assertNotIn(leak, text)
+        self.assertIn("Company Confidential", text)                 # the master's design is kept
+        self.assertTrue(any(sh.shape_type == 13 for sh in prs.slide_master.shapes))   # and its logo
+        moved = prs.slides[slides.index(long_one) + 1].notes_slide.notes_text_frame.text
+        self.assertIn("Point 7 of the slide", moved)                 # nothing lost: moved to the notes
+        fonts = {r.font.name for x in prs.slides for sh in x.shapes if sh.has_text_frame and not sh.is_placeholder
+                 for p in sh.text_frame.paragraphs for r in p.runs if r.font.name}
+        self.assertEqual(fonts, {"Segoe UI"})
+
+        r = json.loads(self.post("/api/review", {"brief": brief, "slides": slides})[2])
+        check = next(c for c in r["checks"] if c["title"] == "Follows the template's directions")
+        self.assertFalse(check["ok"])
+        self.assertIn("more than 4 points", check["detail"])
+
+        d = self._upload()                                           # re-templating uses the same reading
+        st, _, body = self.post("/api/deck/transform", {"deck_id": d["deck_id"], "selected": [1, 2, 3],
+                                "actions": {"retemplate": True}, "brief": brief})
+        self.assertEqual(st, 200, body)
+        prs = self._open(json.loads(body)["file_id"])
+        self.assertEqual([x.slide_layout.name for x in prs.slides], ["LAY_01 Opener", "LAY_06 Std headline", "LAY_06 Std headline"])
+
+    def test_company_template_layout_corrected_by_user(self):
+        from pptx import Presentation
+        t = self._company_template()
+        st, _, body = self.post("/api/template/profile", {"template_file": t["template_file"], "layouts": {"content": "LAY_02 Text"}})
+        self.assertEqual(st, 200, body)
+        self.assertEqual(json.loads(body)["analysis"]["layouts"]["content"], "LAY_02 Text")
+        for bad in ({"content": "No such layout"}, {"cover": None}):
+            self.assertEqual(self.post("/api/template/profile", {"template_file": t["template_file"], "layouts": bad})[0], 400)
+        brief = dict(BRIEF, template_file=t["template_file"])
+        s = json.loads(self.post("/api/storyline", {"brief": brief, "version": "summary"})[2])
+        body = self.post("/api/export/pptx", {"brief": brief, "title": s["title"], "slides": s["slides"]})[2]
+        self.assertEqual(Presentation(io.BytesIO(body)).slides[-1].slide_layout.name, "LAY_02 Text")
+
+    def test_company_template_wrong_ai_reading_ignored(self):
+        mock_llm.TEMPLATE_REPLY.append({"layouts": {"cover": "Opening slide", "content": "LAY_06 Std headline"},
+                                        "rules": {"max_bullets": 99, "max_slides": "twelve", "agenda": "yes"}})
+        a = self._company_template()["analysis"]
+        self.assertEqual(a["layouts"]["cover"], "LAY_01 Opener")     # not a layout in the file: built-in reading
+        self.assertEqual(a["rules"]["max_bullets"], 4)               # out of range: built-in reading
+        self.assertEqual(a["rules"]["max_slides"], 12)
 
     def test_storyline_chart_export_is_native(self):
         from pptx import Presentation
@@ -816,6 +919,19 @@ class Decks(Base):
 
 class WithoutLLM(Base):
     llm_up = False
+
+    def test_company_template_read_by_rules(self):
+        if not HAVE_PPTX:
+            self.skipTest("python-pptx not installed")
+        st, _, body = self.post("/api/template/upload", raw=sample_template.build(),
+                                headers={"Content-Type": "application/octet-stream", "X-Filename": "master.pptx"})
+        self.assertEqual(st, 200, body)
+        a = json.loads(body)["analysis"]
+        self.assertEqual(a["source"], "rules")
+        self.assertEqual((a["layouts"]["cover"], a["layouts"]["content"], a["layouts"]["agenda"]),
+                         ("LAY_01 Opener", "LAY_06 Std headline", "LAY_02 Text"))
+        self.assertEqual(a["rules"], {"max_bullets": 4, "max_headline_words": 12, "max_slides": 12, "agenda": True,
+                                      "source_line": True})
 
     def test_fallback_deck_rewrite(self):
         if not HAVE_PPTX:

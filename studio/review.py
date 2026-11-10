@@ -11,7 +11,10 @@ def _words(s):
     return len(s.split())
 
 
-def run(brief, slides):
+def run(brief, slides, rules=None):
+    """rules: an uploaded template's limits (template_kit), checked as well when given."""
+    rules = rules or {}
+    max_words = min(MAX_HEADLINE_WORDS, rules.get("max_headline_words") or MAX_HEADLINE_WORDS)
     checks = []
     content = [s for s in slides if s["kind"] != "title"]
 
@@ -32,12 +35,12 @@ def run(brief, slides):
         "Slide%s %s still need%s a headline that states the finding." % ("s" if len(weak) > 1 else "", _list(weak), "" if len(weak) > 1 else "s"),
     })
 
-    long_h = [i + 1 for i, s in enumerate(slides) if _words(s["headline"]) > MAX_HEADLINE_WORDS]
+    long_h = [i + 1 for i, s in enumerate(slides) if _words(s["headline"]) > max_words]
     checks.append({
         "ok": not long_h,
         "title": "Headlines are concise",
-        "detail": "All headlines are %d words or fewer." % MAX_HEADLINE_WORDS if not long_h else
-        "Shorten the headline on slide%s %s to %d words or fewer." % ("s" if len(long_h) > 1 else "", _list(long_h), MAX_HEADLINE_WORDS),
+        "detail": "All headlines are %d words or fewer." % max_words if not long_h else
+        "Shorten the headline on slide%s %s to %d words or fewer." % ("s" if len(long_h) > 1 else "", _list(long_h), max_words),
     })
 
     missing = [(i + 1, s["evidence"].get("gap") or "Evidence needed") for i, s in enumerate(slides)
@@ -87,9 +90,32 @@ def run(brief, slides):
                    if too_long else "%d slide%s suits %s." % (n, "" if n == 1 else "s", aud["label"].lower())),
     })
 
-    t = template(brief["template"])
-    checks.append({"ok": True, "title": "Approved template applied", "detail": t["name"] + " masters, fonts and colours."})
+    if rules:
+        checks.append(_template_check(slides, rules))
+    else:
+        t = template(brief["template"])
+        checks.append({"ok": True, "title": "Approved template applied", "detail": t["name"] + " masters, fonts and colours."})
     return {"checks": checks, "range": [lo, hi]}
+
+
+def _template_check(slides, rules):
+    """The limits an uploaded template's guidance sets (bullets per slide, slides per deck)."""
+    problems = []
+    n = rules.get("max_bullets")
+    if n:
+        over = [i + 1 for i, s in enumerate(slides)
+                if s["kind"] in ("summary", "driver", "decision", "roadmap", "bars") and len(s["body"]) > n]
+        if over:
+            problems.append("slide%s %s ha%s more than %d points" % ("s" if len(over) > 1 else "", _list(over),
+                                                                     "ve" if len(over) > 1 else "s", n))
+    cap = rules.get("max_slides")
+    total = len(slides) + (1 if rules.get("agenda") else 0)
+    if cap and total > cap:
+        problems.append("the deck has %d slides%s; the template allows %d" % (
+            total, " with the agenda" if rules.get("agenda") else "", cap))
+    return {"ok": not problems, "title": "Follows the template's directions",
+            "detail": ("Within the limits your template sets." if not problems else
+                       "Your template's guidance: " + "; ".join(problems) + ". Export moves extra points to the notes.")}
 
 
 # "Figures add up" works on additive quantities: points and amounts, plus shares of a whole. Percent
