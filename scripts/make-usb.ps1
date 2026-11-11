@@ -4,9 +4,11 @@
   to the air-gapped server. The version is __version__ in studio\__init__.py; earlier usb_* folders are kept.
 
 .DESCRIPTION
-  Takes the files tracked in git (minus dev-only files), the wheels, and a server .env made
-  from .env.example (DEVELOPMENT=False, no OpenAI key, LLM_API_KEY empty). Writes VERSION.txt
+  Takes the files tracked in git (minus dev-only files) and the wheels, and writes VERSION.txt
   with the git version, so the server always shows which release it runs.
+  The package holds NO server settings: no .env and no config.json. The server keeps its own.
+  Settings a release needs added or changed go in DEPLOY-NOTES.md under that version; the script
+  refuses to build without that section and copies the notes next to the exec-studio folder.
   For a release, set __version__, commit and tag first (git tag v1.6.0), then run this script.
 
 .EXAMPLE
@@ -24,6 +26,9 @@ $dest = Join-Path $out "exec-studio"
 $version = (git describe --tags --always --dirty)
 if ($version -ne "v$appVersion") { Write-Warning "This build is $version, not the tagged release v$appVersion. Tag the release commit first." }
 if (git status --porcelain) { Write-Warning "Uncommitted changes are included: this is not a clean release ($version)." }
+if (-not (Select-String -Path "DEPLOY-NOTES.md" -Pattern ("^## " + [regex]::Escape($appVersion) + "\s*$") -Quiet)) {
+    throw "DEPLOY-NOTES.md has no '## $appVersion' section. Add it, with the server settings to add or change ('Server settings: none.' if there are none)."
+}
 if (-not (Get-ChildItem "wheels" -Filter *.whl -ErrorAction SilentlyContinue)) { throw "No wheels in .\wheels. Run scripts\1-download-wheels.ps1 first." }
 
 if (Test-Path $out) { Remove-Item -Recurse -Force $out }
@@ -42,14 +47,11 @@ foreach ($f in (git -c core.quotepath=off ls-files)) {
 New-Item -ItemType Directory -Force -Path (Join-Path $dest "wheels") | Out-Null
 Copy-Item "wheels\*.whl" (Join-Path $dest "wheels")
 
-# 3. Server .env: from .env.example, never from the laptop's own .env (that holds the OpenAI key)
-$inDev = $false
-$envLines = foreach ($line in Get-Content ".env.example") {
-    if ($line -match '^# --- Development only') { $inDev = $true; continue }
-    if ($line -match '^# --- Production only') { $inDev = $false }
-    if (-not $inDev) { $line -replace '^DEVELOPMENT=.*', 'DEVELOPMENT=False' }
+# 3. No server settings in the package: the server keeps its own .env and config.json
+foreach ($f in ".env", "config.json") {
+    if (Test-Path (Join-Path $dest $f)) { throw "$f ended up in the package. Server settings stay on the server." }
 }
-[IO.File]::WriteAllLines((Join-Path $dest ".env"), $envLines, (New-Object Text.UTF8Encoding $false))
+Copy-Item "DEPLOY-NOTES.md" (Join-Path $out "DEPLOY-NOTES.md")
 
 # 4. Version stamp
 [IO.File]::WriteAllLines((Join-Path $dest "VERSION.txt"), @("exec-studio $version", "built $(Get-Date -Format s)"))
@@ -59,4 +61,5 @@ if (@($textFiles | Select-String -Pattern 'sk-[A-Za-z0-9_-]{8}').Count -gt 0) { 
 
 Write-Host ""
 Write-Host "Built $dest ($version)." -ForegroundColor Green
-Write-Host "Copy the 'exec-studio' folder in $folder to the USB stick, plus python-3.11.x-amd64.exe for a first install." -ForegroundColor Green
+Write-Host "Copy the 'exec-studio' folder and DEPLOY-NOTES.md in $folder to the USB stick, plus python-3.11.x-amd64.exe for a first install." -ForegroundColor Green
+Write-Host "Server settings (.env, config.json) are not in the package. Check DEPLOY-NOTES.md for any to change on the server." -ForegroundColor Yellow

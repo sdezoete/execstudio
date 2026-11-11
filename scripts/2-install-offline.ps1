@@ -2,6 +2,7 @@
 .SYNOPSIS
   STEP 2 - run on the air-gapped Windows server.
   Creates .venv and installs the libraries from .\wheels without internet access.
+  On a first install it also creates config.json and .env; existing ones are kept.
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File scripts\2-install-offline.ps1
@@ -51,6 +52,18 @@ if (Test-Path "wheels") {
 if (-not (Test-Path "config.json")) {
     Copy-Item "config.example.json" "config.json"
     Write-Host "Created config.json - set llm_base_url and llm_model for your DeepSeek server." -ForegroundColor Yellow
+}
+# First install only: a server .env from .env.example (DEVELOPMENT=False, no OpenAI section).
+# An existing .env is never touched: updates keep the server's own settings (DEPLOY-NOTES.md lists changes).
+if (-not (Test-Path ".env") -and (Test-Path ".env.example")) {
+    $inDev = $false
+    $envLines = foreach ($line in Get-Content ".env.example") {
+        if ($line -match '^# --- Development only') { $inDev = $true; continue }
+        if ($line -match '^# --- Production only') { $inDev = $false }
+        if (-not $inDev) { $line -replace '^DEVELOPMENT=.*', 'DEVELOPMENT=False' }
+    }
+    [IO.File]::WriteAllLines((Join-Path $root ".env"), $envLines, (New-Object Text.UTF8Encoding $false))
+    Write-Host "Created .env (DEVELOPMENT=False) - fill in LLM_API_KEY." -ForegroundColor Yellow
 }
 New-Item -ItemType Directory -Force -Path "logs", "work", "data\templates", "certs" | Out-Null
 

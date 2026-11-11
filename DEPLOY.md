@@ -19,9 +19,9 @@ Nothing else is needed: the server, the LLM client and the Word, Excel and CSV r
 
 ## 2. What to copy
 
-On the laptop, run `scripts\make-usb.ps1`. It builds `usb_<version>\exec-studio` (for 1.6.0: `usb_1_6_0\exec-studio`; earlier `usb_*` folders are kept) with exactly the files the server needs: the files tracked in git, `wheels\`, a `VERSION.txt`, and a server `.env` made from `.env.example` (`DEVELOPMENT=False`, no OpenAI key, `LLM_API_KEY` empty). Copy that `exec-studio` folder to the USB stick, together with the Python installer.
+On the laptop, run `scripts\make-usb.ps1`. It builds `usb_<version>\exec-studio` (for 1.6.0: `usb_1_6_0\exec-studio`; earlier `usb_*` folders are kept) with exactly the files the server needs: the files tracked in git, `wheels\` and a `VERSION.txt`. Next to it, it puts [DEPLOY-NOTES.md](DEPLOY-NOTES.md). Copy the `exec-studio` folder and `DEPLOY-NOTES.md` to the USB stick, together with the Python installer.
 
-Never copy the laptop's own `.env`: it holds the development OpenAI key. `certs\` and `config.json` are created on the server.
+**The package holds no server settings:** no `.env` and no `config.json`. The laptop's `.env` holds the development OpenAI key, and the server keeps its own settings across updates. On a first install, `2-install-offline.ps1` creates both from the templates (see §3). When a release needs a setting added or changed, the change is listed in `DEPLOY-NOTES.md` under that version, and you make it on the server by hand. `certs\` is also created on the server.
 
 ## 3. Install (on the server)
 
@@ -30,7 +30,7 @@ cd D:\exec-studio
 powershell -ExecutionPolicy Bypass -File scripts\2-install-offline.ps1
 ```
 
-The script creates `.venv`, installs from `wheels\` without internet access, creates `config.json` and finishes with a check line. It should read:
+The script creates `.venv` and installs from `wheels\` without internet access. On a first install it also creates `config.json` (from `config.example.json`) and a server `.env` (from `.env.example`, with `DEVELOPMENT=False` and `LLM_API_KEY` empty); existing ones are never overwritten. It finishes with a check line. It should read:
 
 ```
 PowerPoint engine: python-pptx 1.0.2 | PDF reading: True | .pfx certificates: True
@@ -77,16 +77,17 @@ Develop and test on the laptop only. Never edit code on the server.
 **Release (laptop):**
 
 1. Make the change, run the tests (`python -m unittest discover -s tests`), and commit.
-2. Set `__version__` in `studio/__init__.py` (e.g. `1.6.0`), commit, and tag the release: `git tag v1.6.0`.
-3. Run `scripts\make-usb.ps1`. It warns if there are uncommitted changes: a release comes from a clean, tagged commit. If `requirements.txt` changed, run `scripts\1-download-wheels.ps1` first.
+2. Set `__version__` in `studio/__init__.py` (e.g. `1.6.0`). Add a `## 1.6.0` section to `DEPLOY-NOTES.md` that lists every `.env` or `config.json` setting the server must add or change. Write "Server settings: none." if there are none. Commit, and tag the release: `git tag v1.6.0`.
+3. Run `scripts\make-usb.ps1`. It refuses to build without that section, and warns if there are uncommitted changes: a release comes from a clean, tagged commit. If `requirements.txt` changed, run `scripts\1-download-wheels.ps1` first.
 
 **Install the update (server):**
 
 1. Stop the studio: `Stop-ScheduledTask ExecutivePresentationStudio` (Administrator PowerShell).
 2. Rename `D:\exec-studio` to `D:\exec-studio-prev`.
 3. Copy the new `exec-studio` folder from the USB stick to `D:\exec-studio`.
-4. Copy the server's own `.env` and `config.json` (and `certs\`, if the server has one) from `exec-studio-prev` into the new folder, replacing the `.env` from the USB stick.
-5. Run `scripts\2-install-offline.ps1`, then `Start-ScheduledTask ExecutivePresentationStudio`, and check `/api/health` and `VERSION.txt`.
+4. Copy the server's own `.env` and `config.json` (and `certs\`, if the server has one) from `exec-studio-prev` into the new folder. The package brings none of these.
+5. Read `DEPLOY-NOTES.md` from the USB stick and apply the **Server settings** of every version newer than the one in `exec-studio-prev\VERSION.txt`.
+6. Run `scripts\2-install-offline.ps1`, then `Start-ScheduledTask ExecutivePresentationStudio`, and check `/api/health` and `VERSION.txt`.
 
 **Rollback:** stop the task, rename `D:\exec-studio` to `D:\exec-studio-bad` and `D:\exec-studio-prev` back to `D:\exec-studio`, and start the task again.
 

@@ -33,7 +33,7 @@ The package already contains the Windows wheels for Python 3.11 in `wheels\`, so
    - finds Python 3.11
    - creates `.venv`
    - installs the libraries from `wheels\`
-   - creates `config.json`
+   - creates `config.json` and `.env`, if they don't exist yet
 3. Open `.env` next to `server.py` and set the AI model:
    ```ini
    DEVELOPMENT=False
@@ -41,7 +41,7 @@ The package already contains the Windows wheels for Python 3.11 in `wheels\`, so
    LLM_API_KEY=<key issued for this app>
    LLM_MODEL=deepseek-v41-flash
    ```
-   A release built with `scripts\make-usb.ps1` already contains this `.env`, with `DEVELOPMENT=False` and the recommended values, so usually you only need to fill in `LLM_API_KEY`. `LLM_MODEL` must exactly match the gateway's model id. To list the ids, run:
+   On a first install, step 2 creates this `.env` from `.env.example`, with `DEVELOPMENT=False` and the recommended values, so usually you only need to fill in `LLM_API_KEY`. Release packages never contain a `.env` or `config.json`, so an update keeps the server's own. Settings a release needs changed are listed in [DEPLOY-NOTES.md](DEPLOY-NOTES.md). `LLM_MODEL` must exactly match the gateway's model id. To list the ids, run:
    `Invoke-RestMethod https://<llm-host>/v1/models -Headers @{Authorization="Bearer <key>"}`
 4. **Set up HTTPS with your certificate.** See [HTTPS](#https) below. In short, from an Administrator PowerShell:
    ```powershell
@@ -286,6 +286,7 @@ If the AI model is unreachable, every AI feature falls back to built-in rules. T
 server.py                 web server: static files + /api
 config.example.json       copy to config.json
 .env.example              copy to .env: DEVELOPMENT flag, OpenAI (dev) and LLM_* (server) settings
+DEPLOY-NOTES.md           per release: server settings to add or change (goes on the USB stick)
 requirements.txt          optional libraries (python-pptx, pypdf)
 wheels\                   Windows / Python 3.11 wheels for offline install
 scripts\                  1-download-wheels.ps1, 2-install-offline.ps1, export-cert-from-store.ps1,
